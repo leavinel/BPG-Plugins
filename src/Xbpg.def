@@ -1,0 +1,12 @@
+EXPORTS
+	gfpGetPluginInfo
+	gfpLoadPictureInit
+	gfpLoadPictureGetInfo
+	gfpLoadPictureGetLine
+	gfpLoadPictureGetColormap
+	gfpLoadPictureExit
+	gfpSavePictureIsSupported
+	gfpSavePictureInit
+	gfpSavePicturePutColormap
+	gfpSavePicturePutLine
+	gfpSavePictureExit
