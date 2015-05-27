@@ -35,7 +35,7 @@ static FILE* open_ini_file()
 {
     string s_ini;
     get_ini_path (s_ini);
-    dprintf ("Open INI file '%s'...", s_ini.c_str());
+    dprintf ("Open INI file '%s'...\n", s_ini.c_str());
     return fopen (s_ini.c_str(), "rb");
 }
 
@@ -56,11 +56,10 @@ static void get_param (const char buf[], const char s_opt[], const char s_fmt[],
 }
 
 
-static void load_param (BPGEncoderParameters &param, int *bit_depth)
+void BpgEncParam::loadParam()
 {
     FILE *fp;
-    char buf[64];
-    int tmp;
+    char line[64];
 
     fp = open_ini_file();
     if (!fp)
@@ -69,50 +68,76 @@ static void load_param (BPGEncoderParameters &param, int *bit_depth)
         return;
     }
 
-    fgets (buf, sizeof(buf), fp);
+    fgets (line, sizeof(line), fp);
     fclose (fp);
-    dprintf ("option: %s\n", buf);
+    dprintf ("option: %s\n", line);
 
     /* QP */
-    get_param (buf, "-q", "-q %d", &param.qp);
-    dprintf ("-q %d\n", param.qp);
+    get_param (line, "-q", "-q %d", &pparam->qp);
+    dprintf ("-q %d\n", pparam->qp);
 
     /* Chroma format */
-    tmp = 0;
-    get_param (buf, "-f", "-f %d", &tmp);
-    dprintf ("-f %d\n", tmp);
-
-    switch (tmp)
     {
-    case 0:
-        break;
-    case 420:
-        param.preferred_chroma_format = BPG_FORMAT_420;
-        break;
-    case 422:
-        param.preferred_chroma_format = BPG_FORMAT_422;
-        break;
-    case 444:
-        param.preferred_chroma_format = BPG_FORMAT_444;
-        break;
-    default:
-        throw runtime_error ("invalid chroma format");
+        int tmp = 0;
+        get_param (line, "-f", "-f %d", &tmp);
+        dprintf ("-f %d\n", tmp);
+
+        switch (tmp)
+        {
+        case 420:
+            pparam->preferred_chroma_format = BPG_FORMAT_420;
+            break;
+        case 422:
+            pparam->preferred_chroma_format = BPG_FORMAT_422;
+            break;
+        case 444:
+            pparam->preferred_chroma_format = BPG_FORMAT_444;
+            break;
+        default:
+            throw runtime_error ("invalid chroma format");
+        }
     }
 
     /* Bit depth */
-    get_param (buf, "-b", "-b %d", bit_depth);
-    dprintf ("-b %d\n", *bit_depth);
+    get_param (line, "-b", "-b %d", &bitDepth);
+    dprintf ("-b %d\n", bitDepth);
+
+    /* Encoder */
+    {
+        char buf[8];
+        get_param (line, "-e", "-e %7s", buf);
+
+        if (strcmp ("jctvc", buf) == 0)
+            pparam->encoder_type = HEVC_ENCODER_JCTVC;
+        else if (strcmp ("x265", buf) == 0)
+            pparam->encoder_type = HEVC_ENCODER_X265;
+
+        const char *s_enc = NULL;
+        switch (pparam->encoder_type)
+        {
+        case HEVC_ENCODER_JCTVC:
+            s_enc = "JCTVC";
+            break;
+        case HEVC_ENCODER_X265:
+            s_enc = "X265";
+            break;
+        default:
+            throw runtime_error ("invalid encoder type");
+        }
+
+        dprintf ("Encoder: %s\n", s_enc);
+    }
 
     /* Compression level */
-    get_param (buf, "-m", "-m %d", &param.compress_level);
-    dprintf ("-m %d\n", param.compress_level);
+    get_param (line, "-m", "-m %d", &pparam->compress_level);
+    dprintf ("-m %d\n", pparam->compress_level);
 }
 
 
 BpgEncParam::BpgEncParam(): pparam(NULL), bitDepth(8)
 {
     pparam = bpg_encoder_param_alloc();
-    load_param (*pparam, &bitDepth);
+    loadParam();
 }
 
 BpgEncParam::~BpgEncParam()
@@ -208,23 +233,15 @@ BpgWriter::BpgWriter (const char s_file[], int w, int h, uint8_t bits_per_pixel)
     {
     case 8:
         fmt = BPG_FORMAT_GRAY;
-#ifdef USE_JCTVC
-        param->encoder_type = HEVC_ENCODER_JCTVC;
-        dprintf ("Use JCTVC\n");
-#endif
+        param->preferred_chroma_format = fmt;
         break;
     case 24:
         fmt = BPG_FORMAT_444;
-#ifdef USE_X265
-        param->encoder_type = HEVC_ENCODER_X265;
-        dprintf ("Use x265\n");
-#endif
         break;
     default:
         throw runtime_error ("Invalid bits per pixel");
     }
 
-    param->preferred_chroma_format = fmt;
     img = new BpgEncImage (w, h, fmt, BPG_CS_YCbCr, param.GetBitDepth());
 
     dprintf ("Open %s\n", s_file);

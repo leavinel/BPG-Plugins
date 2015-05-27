@@ -73,6 +73,7 @@ class BpgEncParam
 private:
     BPGEncoderParameters *pparam;
     int bitDepth;
+    void loadParam();
 
 public:
     BpgEncParam();

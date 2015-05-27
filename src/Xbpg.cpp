@@ -10,7 +10,6 @@
 
 #include "Xbpg.h"
 
-#define PLUGIN_NAME     "BPG reader/writer"
 #define FORMAT_NAME     "BPG Image"
 #define FORMAT_EXT      "bpg"
 
@@ -93,7 +92,7 @@ EXTC BOOL API gfpGetPluginInfo (
     if ( version != 0x0002 )
         return FALSE;
 
-    strncpy (label, PLUGIN_NAME, label_max_size);
+    strncpy (label, FORMAT_NAME, label_max_size);
     strncpy (extension, FORMAT_EXT, extension_max_size);
     *support = GFP_READ | GFP_WRITE;
 
@@ -112,6 +111,28 @@ EXTC void *API gfpLoadPictureInit (LPCSTR filename)
     }
 
     return NULL;
+}
+
+
+static void format_label (char *label, int sz, int fmt, int cs)
+{
+    static const char *s_fmt[] = {
+        "Grayscale",
+        "4:2:0",
+        "4:2:2",
+        "4:4:4",
+        "4:2:0V",
+        "4:2:2V",
+    };
+    static const char *s_cs[] = {
+        "YCbCr",
+        "RGB",
+        "YCgCo",
+        "YCbCr(Bt.709)",
+        "YCbCr(Bt.2020)"
+    };
+
+    snprintf (label, sz, "BPG %s %s", s_fmt[fmt], s_cs[cs]);
 }
 
 
@@ -139,7 +160,7 @@ EXTC BOOL API gfpLoadPictureGetInfo (
     *bytes_per_line = file.linesz;
     *has_colormap = FALSE;
 
-    strncpy (label, FORMAT_NAME, label_max_size);
+    format_label (label, label_max_size, info.format, info.color_space);
     return TRUE;
 }
 

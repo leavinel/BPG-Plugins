@@ -4,7 +4,6 @@ dll_NAME = Xbpg.usr
 libx265_PATH = libx265/libx265.a
 bpg_PATH = libbpg-0.9.5
 libbpg_PATH = $(bpg_PATH)/libbpg.a
-libgcc_PATH = $(shell $(GCC) -print-libgcc-file-name)
 
 GCC = gcc
 CXX = g++
@@ -44,7 +43,7 @@ clean:
 	rm -rf $(dll_DIR)
 
 
-$(dll_PATH): $(dll_OBJ) src/Xbpg.def $(libbpg_PATH) $(libx265_PATH) $(libgcc_PATH)
+$(dll_PATH): $(dll_OBJ) src/Xbpg.def $(libbpg_PATH) $(libx265_PATH)
 	$(CXX) -shared $(CFLAGS) $^ $(LDFLAGS) -o $@
 
 $(dll_DIR):
