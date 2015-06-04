@@ -5,12 +5,21 @@
  * @author Leav Wu (leavinel@gmail.com)
  */
 
-#ifndef _XBPG_H_
-#define _XBPG_H_
+#ifndef _BPG_COMMON_H_
+#define _BPG_COMMON_H_
 
 
 #include <stdint.h>
 #include <stdexcept>
+#include <string>
+
+
+#define MODULE_NAME     "BPG Format Plugin (libbpg-0.9.5; libx265-1.7)"
+#define FORMAT_NAME     "BPG Image"
+#define FORMAT_EXT      "bpg"
+
+#define EXTC extern "C"
+
 
 extern "C" {
 #include "libbpg.h"
@@ -25,7 +34,6 @@ void dprintf (const char s_fmt[], ...) __attribute__((format(printf, 1, 2)));
         throw runtime_error (#expr " failed")
 
 
-
 class BpgDecoder
 {
 private:
@@ -35,7 +43,7 @@ public:
     BpgDecoder();
     ~BpgDecoder();
 
-    void Decode (const uint8_t *buf, size_t len);
+    void Decode (const void *buf, size_t len);
     void GetInfo (BPGImageInfo &info);
     void Start (BPGDecoderOutputFormat out_fmt);
     void GetLine (void *buf);
@@ -49,7 +57,7 @@ class BpgReader
 {
 private:
     BpgDecoder decoder;
-    uint8_t *buf;
+    uint8_t *decodeBuf;
 
     enum {
         FORMAT_GRAY,
@@ -62,22 +70,29 @@ public:
     uint8_t bitsPerPixel;
     size_t linesz;
 
-    BpgReader (const char s_file[]);
+    BpgReader();
     ~BpgReader();
-    void GetLine (int line, void *dst) const;
+    void LoadFromFile (const char s_file[]);
+    void LoadFromBuffer (const void *buf, size_t len);
+    void GetFormatDetail (char buf[], size_t sz) const;
+    void GetFormatDetail (std::string &s) const;
+    void GetLine (int line, void *dst, const uint8_t rgba_offset[] = NULL) const;
 };
 
 
 class BpgEncParam
 {
+public:
 private:
     BPGEncoderParameters *pparam;
-    int bitDepth;
-    void loadParam();
 
 public:
+    int BitDepth;
+
     BpgEncParam();
     ~BpgEncParam();
+
+    void ParseParam (const char s_buf[]);
 
     BPGEncoderParameters* operator->() {
         return pparam;
@@ -85,10 +100,6 @@ public:
 
     operator BPGEncoderParameters*() const {
         return pparam;
-    }
-
-    int GetBitDepth() const {
-        return bitDepth;
     }
 };
 
@@ -147,4 +158,4 @@ public:
 };
 
 
-#endif /* _XBPG_H_ */
+#endif /* _BPG_COMMON_H_ */

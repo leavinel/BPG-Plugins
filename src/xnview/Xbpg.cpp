@@ -5,48 +5,11 @@
  */
 
 #include <stdio.h>
-#include <stdarg.h>
 #include <windows.h>
 
-#include "Xbpg.h"
-
-#define FORMAT_NAME     "BPG Image"
-#define FORMAT_EXT      "bpg"
+#include "bpg_common.h"
 
 using namespace std;
-
-#define EXTC extern "C"
-
-/**
- * Print error message
- */
-void pr_err (const char s_fmt[], ...)
-{
-    va_list ap;
-    char buf[256];
-
-    va_start (ap, s_fmt);
-    vsnprintf (buf, sizeof(buf), s_fmt, ap);
-    va_end (ap);
-
-    MessageBoxA (NULL, buf, "Error", MB_OK);
-}
-
-
-/**
- * Print debug message to debugger
- */
-void dprintf (const char s_fmt[], ...)
-{
-    va_list ap;
-    char buf[256];
-
-    va_start (ap, s_fmt);
-    vsnprintf (buf, sizeof(buf), s_fmt, ap);
-    va_end (ap);
-
-    OutputDebugStringA (buf);
-}
 
 
 EXTC BOOL APIENTRY DllMain (HANDLE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
@@ -103,7 +66,8 @@ EXTC BOOL API gfpGetPluginInfo (
 EXTC void *API gfpLoadPictureInit (LPCSTR filename)
 {
     try {
-        BpgReader *pfile = new BpgReader (filename);
+        BpgReader *pfile = new BpgReader();
+        pfile->LoadFromFile (filename);
         return pfile;
     }
     catch (const exception &e) {
@@ -111,28 +75,6 @@ EXTC void *API gfpLoadPictureInit (LPCSTR filename)
     }
 
     return NULL;
-}
-
-
-static void format_label (char *label, int sz, int fmt, int cs)
-{
-    static const char *s_fmt[] = {
-        "Grayscale",
-        "4:2:0",
-        "4:2:2",
-        "4:4:4",
-        "4:2:0V",
-        "4:2:2V",
-    };
-    static const char *s_cs[] = {
-        "YCbCr",
-        "RGB",
-        "YCgCo",
-        "YCbCr(Bt.709)",
-        "YCbCr(Bt.2020)"
-    };
-
-    snprintf (label, sz, "BPG %s %s", s_fmt[fmt], s_cs[cs]);
 }
 
 
@@ -160,7 +102,7 @@ EXTC BOOL API gfpLoadPictureGetInfo (
     *bytes_per_line = file.linesz;
     *has_colormap = FALSE;
 
-    format_label (label, label_max_size, info.format, info.color_space);
+    file.GetFormatDetail (label, label_max_size);
     return TRUE;
 }
 

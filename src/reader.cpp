@@ -9,7 +9,9 @@
 #include <string.h>
 #include <string>
 
-#include "Xbpg.h"
+#include "bpg_common.h"
+
+#define GETBYTE(val,n)      (((val) >> (n)) & 0xFF)
 
 using namespace std;
 
@@ -30,9 +32,9 @@ BpgDecoder::~BpgDecoder()
     }
 }
 
-void BpgDecoder::Decode (const uint8_t *buf, size_t len)
+void BpgDecoder::Decode (const void *buf, size_t len)
 {
-    FAIL_THROW (bpg_decoder_decode (ctx, buf, len));
+    FAIL_THROW (bpg_decoder_decode (ctx, (uint8_t*)buf, len));
 }
 
 void BpgDecoder::GetInfo (BPGImageInfo &info)
@@ -51,32 +53,27 @@ void BpgDecoder::GetLine (void *buf)
 }
 
 
-BpgReader::BpgReader (const char s_file[]): buf(NULL), linesz(0)
+BpgReader::BpgReader(): decodeBuf(NULL), fmt(FORMAT_RGB), bitsPerPixel(0), linesz(0)
 {
-    do {
-        FILE *fp = fopen (s_file, "rb");
+}
 
-        if (!fp)
-            throw runtime_error (std::string("Cannot open file: ") + s_file);
 
-        fseek (fp, 0, SEEK_END);
-        size_t fsize = ftell (fp);
-        fseek (fp, 0, SEEK_SET);
-
-        uint8_t *buf = new uint8_t [fsize];
-
-        if (fsize != fread (buf, 1, fsize, fp))
-            throw runtime_error ("Failed to read file");
-
-        fclose (fp);
-
-        decoder.Decode (buf, fsize);
-        decoder.GetInfo (info);
+BpgReader::~BpgReader()
+{
+    if (decodeBuf)
+    {
+        delete[] decodeBuf;
+        decodeBuf = NULL;
     }
-    while (0);
+}
+
+
+void BpgReader::LoadFromBuffer (const void *buf, size_t len)
+{
+    decoder.Decode (buf, len);
+    decoder.GetInfo (info);
 
     BPGDecoderOutputFormat out_fmt;
-
     if (info.format == BPG_FORMAT_GRAY)
     {
         fmt = FORMAT_GRAY;
@@ -101,8 +98,8 @@ BpgReader::BpgReader (const char s_file[]): buf(NULL), linesz(0)
     else
         linesz = info.width * 4;
 
-    buf = new uint8_t [linesz * info.height];
-    uint8_t *p = buf;
+    this->decodeBuf = new uint8_t [linesz * info.height];
+    uint8_t *p = this->decodeBuf;
 
     decoder.Start (out_fmt);
     for (uint32_t y = 0; y < info.height; y++)
@@ -113,20 +110,69 @@ BpgReader::BpgReader (const char s_file[]): buf(NULL), linesz(0)
 }
 
 
-BpgReader::~BpgReader()
+void BpgReader::LoadFromFile (const char s_file[])
 {
-    if (buf)
-    {
-        delete[] buf;
-        buf = NULL;
+    FILE *fp = fopen (s_file, "rb");
+
+    if (!fp)
+        throw runtime_error (std::string("Cannot open file: ") + s_file);
+
+    fseek (fp, 0, SEEK_END);
+    size_t fsize = ftell (fp);
+    fseek (fp, 0, SEEK_SET);
+
+    uint8_t *buf = new uint8_t [fsize];
+
+    if (fsize != fread (buf, 1, fsize, fp))
+        throw runtime_error ("Failed to read file");
+
+    fclose (fp);
+
+    try {
+        LoadFromBuffer (buf, fsize);
+        delete buf;
+    }
+    catch (const exception &e) {
+        delete buf;
+        throw e;
     }
 }
 
 
-void BpgReader::GetLine (int line, void *_dst) const
+void BpgReader::GetFormatDetail (char buf[], size_t sz) const
+{
+    static const char *s_fmt[] = {
+        "Grayscale",
+        "4:2:0",
+        "4:2:2",
+        "4:4:4",
+        "4:2:0V",
+        "4:2:2V",
+    };
+    static const char *s_cs[] = {
+        "YCbCr",
+        "RGB",
+        "YCgCo",
+        "YCbCr(Bt.709)",
+        "YCbCr(Bt.2020)"
+    };
+
+    snprintf (buf, sz, "BPG %s %s", s_fmt[info.format], s_cs[info.color_space]);
+}
+
+
+void BpgReader::GetFormatDetail (string &s) const
+{
+    char buf[128];
+    GetFormatDetail (buf, sizeof(buf));
+    s = buf;
+}
+
+
+void BpgReader::GetLine (int line, void *_dst, const uint8_t rgba_offset[]) const
 {
     uint8_t *dst = (uint8_t*)_dst;
-    const uint8_t *src = buf;
+    const uint8_t *src = decodeBuf;
     src += linesz * line;
 
     switch (fmt)
@@ -139,8 +185,51 @@ void BpgReader::GetLine (int line, void *_dst) const
         }
         break;
 
+    case FORMAT_RGB:
+        if (rgba_offset == NULL) // By default (RGB)
+        {
+            memcpy (dst, src, linesz);
+        }
+        else
+        {
+            int offr = rgba_offset[0];
+            int offg = rgba_offset[1];
+            int offb = rgba_offset[2];
+
+            for (size_t i = 0; i < info.width; i++)
+            {
+                dst[offr] = *(src++);
+                dst[offg] = *(src++);
+                dst[offb] = *(src++);
+                dst += 3;
+            }
+        }
+        break;
+
+    case FORMAT_RGBA:
+        if (rgba_offset == NULL) // By default (RGBA)
+        {
+            memcpy (dst, src, linesz);
+        }
+        else
+        {
+            uint8_t offr = rgba_offset[0];
+            uint8_t offg = rgba_offset[1];
+            uint8_t offb = rgba_offset[2];
+            uint8_t offa = rgba_offset[3];
+
+            for (size_t i = 0; i < info.width; i++)
+            {
+                dst[offr] = *(src++);
+                dst[offg] = *(src++);
+                dst[offb] = *(src++);
+                dst[offa] = *(src++);
+                dst += 4;
+            }
+        }
+        break;
+
     default:
-        memcpy (dst, src, linesz);
         break;
     }
 }

@@ -12,7 +12,7 @@
 #include <windows.h>
 #include <psapi.h>
 
-#include "Xbpg.h"
+#include "bpg_common.h"
 
 #define INI_PATH        "Plugins\\Xbpg.ini"
 
@@ -40,109 +40,96 @@ static FILE* open_ini_file()
 }
 
 
-static void get_param (const char buf[], const char s_opt[], const char s_fmt[], ...)
+static int get_param (const char buf[], const char s_opt[], const char s_fmt[], ...)
 __attribute__((format (scanf, 3, 4)));
 
-static void get_param (const char buf[], const char s_opt[], const char s_fmt[], ...)
+static int get_param (const char buf[], const char s_opt[], const char s_fmt[], ...)
 {
     const char *target = strstr (buf, s_opt);
     if (!target)
-        return;
+        return 0;
 
     va_list ap;
     va_start (ap, s_fmt);
-    vsscanf (target, s_fmt, ap);
+    int ret = vsscanf (target, s_fmt, ap);
     va_end (ap);
+    return ret;
 }
 
 
-void BpgEncParam::loadParam()
-{
-    FILE *fp;
-    char line[64];
-
-    fp = open_ini_file();
-    if (!fp)
-    {
-        dprintf ("%s", "Cannot open INI file\n");
-        return;
-    }
-
-    fgets (line, sizeof(line), fp);
-    fclose (fp);
-    dprintf ("option: %s\n", line);
-
-    /* QP */
-    get_param (line, "-q", "-q %d", &pparam->qp);
-    dprintf ("-q %d\n", pparam->qp);
-
-    /* Chroma format */
-    {
-        int tmp = 0;
-        get_param (line, "-f", "-f %d", &tmp);
-        dprintf ("-f %d\n", tmp);
-
-        switch (tmp)
-        {
-        case 420:
-            pparam->preferred_chroma_format = BPG_FORMAT_420;
-            break;
-        case 422:
-            pparam->preferred_chroma_format = BPG_FORMAT_422;
-            break;
-        case 444:
-            pparam->preferred_chroma_format = BPG_FORMAT_444;
-            break;
-        default:
-            throw runtime_error ("invalid chroma format");
-        }
-    }
-
-    /* Bit depth */
-    get_param (line, "-b", "-b %d", &bitDepth);
-    dprintf ("-b %d\n", bitDepth);
-
-    /* Encoder */
-    {
-        char buf[8];
-        get_param (line, "-e", "-e %7s", buf);
-
-        if (strcmp ("jctvc", buf) == 0)
-            pparam->encoder_type = HEVC_ENCODER_JCTVC;
-        else if (strcmp ("x265", buf) == 0)
-            pparam->encoder_type = HEVC_ENCODER_X265;
-
-        const char *s_enc = NULL;
-        switch (pparam->encoder_type)
-        {
-        case HEVC_ENCODER_JCTVC:
-            s_enc = "JCTVC";
-            break;
-        case HEVC_ENCODER_X265:
-            s_enc = "X265";
-            break;
-        default:
-            throw runtime_error ("invalid encoder type");
-        }
-
-        dprintf ("Encoder: %s\n", s_enc);
-    }
-
-    /* Compression level */
-    get_param (line, "-m", "-m %d", &pparam->compress_level);
-    dprintf ("-m %d\n", pparam->compress_level);
-}
-
-
-BpgEncParam::BpgEncParam(): pparam(NULL), bitDepth(8)
+BpgEncParam::BpgEncParam(): pparam(NULL), BitDepth(8)
 {
     pparam = bpg_encoder_param_alloc();
-    loadParam();
 }
 
 BpgEncParam::~BpgEncParam()
 {
     bpg_encoder_param_free (pparam);
+}
+
+/**
+ * Parse encoding parameters with option string
+ */
+void BpgEncParam::ParseParam (const char s_opt[])
+{
+    /* QP */
+    if (get_param (s_opt, "-q", "-q %d", &pparam->qp))
+        dprintf ("-q %d\n", pparam->qp);
+
+    /* Chroma format */
+    {
+        int tmp = 0;
+        if (get_param (s_opt, "-f", "-f %d", &tmp))
+        {
+            switch (tmp)
+            {
+            case 420:
+                pparam->preferred_chroma_format = BPG_FORMAT_420;
+                break;
+            case 422:
+                pparam->preferred_chroma_format = BPG_FORMAT_422;
+                break;
+            case 444:
+                pparam->preferred_chroma_format = BPG_FORMAT_444;
+                break;
+            default:
+                throw runtime_error ("invalid chroma format");
+            }
+
+            dprintf ("-f %d\n", tmp);
+        }
+    }
+
+    /* Bit depth */
+    if (get_param (s_opt, "-b", "-b %d", &BitDepth))
+        dprintf ("-b %d\n", BitDepth);
+
+    /* Encoder */
+    {
+        char buf[8];
+        if (get_param (s_opt, "-e", "-e %7s", buf))
+        {
+            if (strcmp ("jctvc", buf) == 0)
+                pparam->encoder_type = HEVC_ENCODER_JCTVC;
+            else if (strcmp ("x265", buf) == 0)
+                pparam->encoder_type = HEVC_ENCODER_X265;
+            else
+                throw runtime_error ("invalid encoder type");
+
+            dprintf ("-e %s\n", buf);
+        }
+    }
+
+    /* Compression level */
+    if (get_param (s_opt, "-m", "-m %d", &pparam->compress_level))
+        dprintf ("-m %d\n", pparam->compress_level);
+
+    /* Loseless mode */
+    if (strstr (s_opt, "-loseless"))
+    {
+        pparam->lossless = 1;
+        dprintf ("%s", "-loseless\n");
+    }
 }
 
 
@@ -195,16 +182,19 @@ BpgEncImage::BpgEncImage (int w, int h,
     img = image_alloc (w, h, fmt, 0, cs, bit_depth);
 }
 
+
 BpgEncImage::~BpgEncImage()
 {
     image_free (img);
     delete in_buf;
 }
 
+
 void BpgEncImage::PutLine (int line, const void *dat)
 {
     memcpy (in_buf + line * buf_linesz, dat, buf_linesz);
 }
+
 
 void BpgEncImage::Finish()
 {
@@ -227,28 +217,60 @@ void BpgEncImage::Finish()
 BpgWriter::BpgWriter (const char s_file[], int w, int h, uint8_t bits_per_pixel)
 {
     BPGImageFormatEnum fmt;
-
-    /* x265 does not support monochrome */
     switch (bits_per_pixel)
     {
-    case 8:
+    case 8: // Grayscale
         fmt = BPG_FORMAT_GRAY;
-        param->preferred_chroma_format = fmt;
+        param->preferred_chroma_format = BPG_FORMAT_GRAY;
         break;
-    case 24:
+    case 24: // Color
         fmt = BPG_FORMAT_444;
         break;
     default:
         throw runtime_error ("Invalid bits per pixel");
     }
 
-    img = new BpgEncImage (w, h, fmt, BPG_CS_YCbCr, param.GetBitDepth());
+    /* Read INI file */
+    {
+        FILE *f_ini = open_ini_file();
 
+        if (!f_ini)
+        {
+            dprintf ("%s", "Cannot open INI file\n");
+        }
+        else
+        {
+            int line_no = 0;
+            switch (bits_per_pixel)
+            {
+            case 8: // Grayscale, use 2nd line
+                line_no = 2;
+                break;
+            case 24: // Color, use 1st line
+                line_no = 1;
+                break;
+            default:
+                break;
+            }
+
+            char buf[64] = "";
+            for (int i = 0; i < line_no; i++)
+                fgets (buf, sizeof(buf), f_ini);
+
+            fclose (f_ini);
+            param.ParseParam (buf);
+        }
+    }
+
+    /* Loaded from INI file, create a frame buffer */
+    img = new BpgEncImage (w, h, fmt, BPG_CS_YCbCr, param.BitDepth);
     dprintf ("Open %s\n", s_file);
+
     fp = fopen (s_file, "wb");
     if (!fp)
         throw runtime_error ("Cannot open file");
 }
+
 
 BpgWriter::~BpgWriter()
 {
@@ -265,6 +287,7 @@ BpgWriter::~BpgWriter()
         fp = NULL;
     }
 }
+
 
 void BpgWriter::Write()
 {

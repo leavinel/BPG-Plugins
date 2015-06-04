@@ -1,5 +1,6 @@
 obj_PATH = obj/
-dll_NAME = Xbpg.usr
+xnview_NAME = xnview/Xbpg.usr
+imagine_NAME = imagine/bpg.plg
 
 libx265_PATH = libx265/libx265.a
 bpg_PATH = libbpg-0.9.5
@@ -9,7 +10,7 @@ GCC = gcc
 CXX = g++
 RC = windres
 
-CPPFLAGS += -DUSE_JCTVC -DUSE_X265 -I$(bpg_PATH)
+CPPFLAGS += -DUSE_JCTVC -DUSE_X265 -I$(bpg_PATH) -Isrc
 CFLAGS += -Wall
 LDFLAGS += 
 
@@ -21,38 +22,63 @@ CFLAGS += -O2
 endif
 
 
-dll_PATH = $(obj_PATH)$(dll_NAME)
+# Utility functions
+filter-subst=$(patsubst $2,$3,$(filter $2, $1))
 
-dll_CPP += $(addprefix src/,reader.cpp writer.cpp Xbpg.cpp)
-dll_RC += $(addprefix src/,Xbpg.rc)
+src2obj=\
+$(call filter-subst,$1,src/%.cpp,obj/%.cpp.o)\
+$(call filter-subst,$1,src/%.rc,obj/%.rc.o)\
+$(filter %.def,$1)
 
-dll_CPP_OBJ = $(patsubst src/%.cpp,$(obj_PATH)%.o,$(dll_CPP))
-dll_RC_OBJ  = $(patsubst src/%.rc,$(obj_PATH)%.rc.o,$(dll_RC))
-dll_OBJ += $(dll_CPP_OBJ) $(dll_RC_OBJ)
+out-dirs=$(sort $(filter obj/%,$(dir $1)))
 
-dll_DIR = $(sort $(dir $(dll_OBJ)))
+# Variables
+xnview_OUT=obj/$(xnview_NAME)
+imagine_OUT=obj/$(imagine_NAME)
 
-.PHONY: all dll clean
+common_SRC+=$(addprefix src/, reader.cpp writer.cpp dprintf.cpp)
+common_OBJ=$(call src2obj,$(common_SRC))
+common_H=$(wildcard src/*.h)
+
+xnview_SRC+=$(addprefix src/xnview/,Xbpg.cpp Xbpg.rc Xbpg.def)
+xnview_OBJ=$(call src2obj,$(xnview_SRC)) $(common_OBJ)
+xnview_OUTDIR=$(call out-dirs,$(xnview_OBJ))
+
+imagine_SRC+=$(addprefix src/imagine/, bpg.cpp bpg.def)
+imagine_OBJ=$(call src2obj,$(imagine_SRC)) $(common_OBJ)
+imagine_OUTDIR=$(call out-dirs,$(imagine_OBJ))
+
+
+# Targets
+.PHONY: all xnview imagine clean
 .DEFAULT_GOAL = all
 
-all: dll
-
-dll: $(dll_PATH)
+all: xnview imagine
 
 clean:
-	rm -rf $(dll_DIR)
+	rm -rf obj
 
+xnview: $(xnview_OUT)
+imagine: $(imagine_OUT)
 
-$(dll_PATH): $(dll_OBJ) src/Xbpg.def $(libbpg_PATH) $(libx265_PATH)
+$(xnview_OBJ): | $(xnview_OUTDIR)
+$(xnview_OUT): $(xnview_OBJ)
+
+$(imagine_OBJ): | $(imagine_OUTDIR)
+$(imagine_OUT): $(imagine_OBJ)
+
+$(xnview_OUT) $(imagine_OUT): $(libbpg_PATH) $(libx265_PATH)
+
+$(xnview_OUT) $(imagine_OUT):
 	$(CXX) -shared $(CFLAGS) $^ $(LDFLAGS) -o $@
 
-$(dll_DIR):
+$(sort $(xnview_OUTDIR) $(imagine_OUTDIR)):
 	mkdir -p $@
 
-$(dll_OBJ): | $(dll_DIR)
+obj/%.o: $(common_H)
 
-$(dll_CPP_OBJ): $(obj_PATH)%.o:src/%.cpp
+obj/%.cpp.o: src/%.cpp
 	$(CXX) -c $(CPPFLAGS) $(CFLAGS) $(CXXFLAGS) $< -o $@
 
-$(dll_RC_OBJ): $(obj_PATH)%.o:src/%
+obj/%.rc.o: src/%.rc
 	$(RC) $< $@
