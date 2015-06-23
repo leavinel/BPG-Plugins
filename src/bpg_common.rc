@@ -1,0 +1,18 @@
+#include <windows.h>
+#include "bpg_def.h"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION     MODULE_VER
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904E4" /* US English, Windows ANSI codepage */
+        BEGIN
+            VALUE "FileDescription", DESCRIPTION
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+          VALUE "Translation", 0x409, 1252
+    END
+END

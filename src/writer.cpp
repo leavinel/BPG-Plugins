@@ -19,25 +19,65 @@
 using namespace std;
 
 
-static void get_ini_path (string &path)
+/**
+ * Ini file smart pointer
+ */
+class IniFile
 {
-    char s_dll_dir[256];
-    GetModuleFileNameA (NULL, s_dll_dir, sizeof(s_dll_dir));
-    char *s_slash = strrchr (s_dll_dir, '\\');
-    s_slash[1] = '\0';
+private:
+    FILE *fp;
 
-    path = s_dll_dir;
-    path += INI_PATH;
-}
+    void getPath (string &path) {
+        char s_dll_dir[256];
+        GetModuleFileNameA (NULL, s_dll_dir, sizeof(s_dll_dir));
+        char *s_slash = strrchr (s_dll_dir, '\\');
+        s_slash[1] = '\0';
 
+        path = s_dll_dir;
+        path += INI_PATH;
+    }
 
-static FILE* open_ini_file()
-{
-    string s_ini;
-    get_ini_path (s_ini);
-    dprintf ("Open INI file '%s'...\n", s_ini.c_str());
-    return fopen (s_ini.c_str(), "rb");
-}
+public:
+    IniFile(): fp(NULL) {
+        string s_ini;
+        getPath (s_ini);
+        dprintf ("Open INI file '%s'...\n", s_ini.c_str());
+        fp = fopen (s_ini.c_str(), "rb");
+    }
+
+    ~IniFile() {
+        if (fp)
+        {
+            fclose (fp);
+            fp = NULL;
+        }
+    }
+
+    /** Test if file is opened */
+    operator bool() const {
+        return fp != NULL;
+    }
+
+    /** Get the line with specified prefix */
+    void getLine (string &s, const char s_prefix[]) {
+        s.clear();
+
+        if (!fp)
+            return;
+
+        char buf[256];
+        rewind (fp);
+
+        while (fgets (buf, sizeof(buf), fp))
+        {
+            if (0 == memcmp (buf, s_prefix, strlen(s_prefix))) // Found
+            {
+                s = buf;
+                break;
+            }
+        }
+    }
+};
 
 
 static int get_param (const char buf[], const char s_opt[], const char s_fmt[], ...)
@@ -232,7 +272,7 @@ BpgWriter::BpgWriter (const char s_file[], int w, int h, uint8_t bits_per_pixel)
 
     /* Read INI file */
     {
-        FILE *f_ini = open_ini_file();
+        IniFile f_ini;
 
         if (!f_ini)
         {
@@ -240,25 +280,26 @@ BpgWriter::BpgWriter (const char s_file[], int w, int h, uint8_t bits_per_pixel)
         }
         else
         {
-            int line_no = 0;
+            const char *s_prefix = NULL;
+
             switch (bits_per_pixel)
             {
-            case 8: // Grayscale, use 2nd line
-                line_no = 2;
+            case 8:
+                s_prefix = "8:";
                 break;
-            case 24: // Color, use 1st line
-                line_no = 1;
+            case 24:
+                s_prefix = "24:";
+                break;
+            case 32:
+                s_prefix = "32:";
                 break;
             default:
                 break;
             }
 
-            char buf[64] = "";
-            for (int i = 0; i < line_no; i++)
-                fgets (buf, sizeof(buf), f_ini);
-
-            fclose (f_ini);
-            param.ParseParam (buf);
+            string s_param;
+            f_ini.getLine (s_param, s_prefix);
+            param.ParseParam (s_param.c_str());
         }
     }
 

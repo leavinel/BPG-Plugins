@@ -44,7 +44,7 @@ xnview_SRC+=$(addprefix src/xnview/,Xbpg.cpp Xbpg.rc Xbpg.def)
 xnview_OBJ=$(call src2obj,$(xnview_SRC)) $(common_OBJ)
 xnview_OUTDIR=$(call out-dirs,$(xnview_OBJ))
 
-imagine_SRC+=$(addprefix src/imagine/, bpg.cpp bpg.def)
+imagine_SRC+=$(addprefix src/imagine/,bpg.cpp bpg.rc bpg.def)
 imagine_OBJ=$(call src2obj,$(imagine_SRC)) $(common_OBJ)
 imagine_OUTDIR=$(call out-dirs,$(imagine_OBJ))
 
@@ -70,7 +70,7 @@ $(imagine_OUT): $(imagine_OBJ)
 $(xnview_OUT) $(imagine_OUT): $(libbpg_PATH) $(libx265_PATH)
 
 $(xnview_OUT) $(imagine_OUT):
-	$(CXX) -shared $(CFLAGS) $^ $(LDFLAGS) -o $@
+	$(CXX) -static -shared $(CFLAGS) $^ $(LDFLAGS) -o $@
 
 $(sort $(xnview_OUTDIR) $(imagine_OUTDIR)):
 	mkdir -p $@

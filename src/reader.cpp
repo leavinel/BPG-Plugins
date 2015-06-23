@@ -11,9 +11,49 @@
 
 #include "bpg_common.h"
 
-#define GETBYTE(val,n)      (((val) >> (n)) & 0xFF)
+#define GETBYTE(val,n)      (((val) >> ((n) * 8)) & 0xFF)
 
 using namespace std;
+
+
+/**
+ * Create a BPG image info from buffer
+ */
+BpgImageInfo2::BpgImageInfo2 (const void *buf, size_t len)
+{
+    FAIL_THROW (bpg_decoder_get_info_from_buf (this, NULL, (uint8_t*)buf, len));
+}
+
+
+uint8_t BpgImageInfo2::GetBpp() const
+{
+    if (format == BPG_FORMAT_GRAY)
+        return 8;
+
+    if (has_alpha)
+        return 32;
+
+    return 24;
+}
+
+
+/**
+ * Check if header magic number matches
+ */
+bool BpgImageInfo2::CheckHeader (const void *buf, size_t len)
+{
+    static const uint8_t magic[] = {
+        GETBYTE(BPG_HEADER_MAGIC,3),
+        GETBYTE(BPG_HEADER_MAGIC,2),
+        GETBYTE(BPG_HEADER_MAGIC,1),
+        GETBYTE(BPG_HEADER_MAGIC,0),
+    };
+
+    if (len < sizeof(magic))
+        return false;
+
+    return 0 == memcmp (&magic, buf, sizeof(magic));
+}
 
 
 BpgDecoder::BpgDecoder(): ctx(NULL)
@@ -32,13 +72,9 @@ BpgDecoder::~BpgDecoder()
     }
 }
 
-void BpgDecoder::Decode (const void *buf, size_t len)
+void BpgDecoder::Decode (BpgImageInfo2 &info, const void *buf, size_t len)
 {
     FAIL_THROW (bpg_decoder_decode (ctx, (uint8_t*)buf, len));
-}
-
-void BpgDecoder::GetInfo (BPGImageInfo &info)
-{
     FAIL_THROW (bpg_decoder_get_info (ctx, &info));
 }
 
@@ -70,27 +106,30 @@ BpgReader::~BpgReader()
 
 void BpgReader::LoadFromBuffer (const void *buf, size_t len)
 {
-    decoder.Decode (buf, len);
-    decoder.GetInfo (info);
+    decoder.Decode (info, buf, len);
 
     BPGDecoderOutputFormat out_fmt;
-    if (info.format == BPG_FORMAT_GRAY)
+
+    bitsPerPixel = info.GetBpp();
+    switch (bitsPerPixel)
     {
+    case 8:
         fmt = FORMAT_GRAY;
         out_fmt = BPG_OUTPUT_FORMAT_RGB24;
-        bitsPerPixel = 8;
-    }
-    else if (info.has_alpha)
-    {
-        fmt = FORMAT_RGBA;
-        out_fmt = BPG_OUTPUT_FORMAT_RGBA32;
-        bitsPerPixel = 32;
-    }
-    else
-    {
+        break;
+
+    case 24:
         fmt = FORMAT_RGB;
         out_fmt = BPG_OUTPUT_FORMAT_RGB24;
-        bitsPerPixel = 24;
+        break;
+
+    case 32:
+        fmt = FORMAT_RGBA;
+        out_fmt = BPG_OUTPUT_FORMAT_RGBA32;
+        break;
+
+    default:
+        break;
     }
 
     if (BPG_OUTPUT_FORMAT_RGB24)

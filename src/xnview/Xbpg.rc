@@ -1,20 +1,3 @@
-#include <windows.h>
+#define DESCRIPTION     "BPG reader/writer plugin for XnView (32-bit)"
 
-#define FILE_VERSION    0,0,0,1
-#define DESCRIPTION     "BPG reader/writer plugin for XnView"
-
-VS_VERSION_INFO VERSIONINFO
-FILEVERSION     FILE_VERSION
-BEGIN
-    BLOCK "StringFileInfo"
-    BEGIN
-        BLOCK "040904E4" /* US English, Windows ANSI codepage */
-        BEGIN
-            VALUE "FileDescription", DESCRIPTION
-        END
-    END
-    BLOCK "VarFileInfo"
-    BEGIN
-          VALUE "Translation", 0x409, 1252
-    END
-END
+#include "../bpg_common.rc"

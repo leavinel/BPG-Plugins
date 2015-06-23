@@ -12,11 +12,8 @@
 #include <stdint.h>
 #include <stdexcept>
 #include <string>
+#include "bpg_def.h"
 
-
-#define MODULE_NAME     "BPG Format Plugin (libbpg-0.9.5; libx265-1.7)"
-#define FORMAT_NAME     "BPG Image"
-#define FORMAT_EXT      "bpg"
 
 #define EXTC extern "C"
 
@@ -34,6 +31,17 @@ void dprintf (const char s_fmt[], ...) __attribute__((format(printf, 1, 2)));
         throw runtime_error (#expr " failed")
 
 
+struct BpgImageInfo2: public BPGImageInfo
+{
+    BpgImageInfo2(){}
+    BpgImageInfo2 (const void *buf, size_t len);
+
+    uint8_t GetBpp() const;
+
+    static bool CheckHeader (const void *buf, size_t len);
+};
+
+
 class BpgDecoder
 {
 private:
@@ -43,8 +51,7 @@ public:
     BpgDecoder();
     ~BpgDecoder();
 
-    void Decode (const void *buf, size_t len);
-    void GetInfo (BPGImageInfo &info);
+    void Decode (BpgImageInfo2 &info, const void *buf, size_t len);
     void Start (BPGDecoderOutputFormat out_fmt);
     void GetLine (void *buf);
 };
@@ -66,7 +73,7 @@ private:
     } fmt;
 
 public:
-    BPGImageInfo info;
+    BpgImageInfo2 info;
     uint8_t bitsPerPixel;
     size_t linesz;
 

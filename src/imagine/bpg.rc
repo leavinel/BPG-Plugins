@@ -1,0 +1,3 @@
+#define DESCRIPTION     "BPG reader/writer plugin for Imagine (32-bit)"
+
+#include "../bpg_common.rc"
