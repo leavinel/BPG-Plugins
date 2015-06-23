@@ -1,0 +1,363 @@
+diff --git a/Makefile b/Makefile
+index b1a34ec..d06bc8c 100644
+--- a/Makefile
++++ b/Makefile
+@@ -5,15 +5,15 @@
+ # Enable compilation of Javascript decoder with Emscripten
+ #USE_EMCC=y
+ # Enable x265 for the encoder (you must install it before)
+-#USE_X265=y
++USE_X265=y
+ # Enable the JCTVC code (best quality but slow) for the encoder
+ USE_JCTVC=y
+ # Compile bpgview (SDL and SDL_image libraries needed)
+-USE_BPGVIEW=y
++#USE_BPGVIEW=y
+ # Enable it to use bit depths > 12 (need more tests to validate encoder)
+ #USE_JCTVC_HIGH_BIT_DEPTH=y
+ # Enable the cross compilation for Windows
+-#CONFIG_WIN32=y
++CONFIG_WIN32=y
+ # Enable for compilation on MacOS X
+ #CONFIG_APPLE=y
+ # Installation prefix
+@@ -24,7 +24,7 @@ prefix=/usr/local
+ 
+ ifdef CONFIG_WIN32
+ #CROSS_PREFIX:=x86_64-w64-mingw32-
+-CROSS_PREFIX=i686-w64-mingw32-
++#CROSS_PREFIX=i686-w64-mingw32-
+ EXE:=.exe
+ else
+ CROSS_PREFIX:=
+@@ -38,7 +38,7 @@ EMCC=emcc
+ 
+ PWD:=$(shell pwd)
+ 
+-CFLAGS:=-Os -Wall -MMD -fno-asynchronous-unwind-tables -fdata-sections -ffunction-sections -fno-math-errno -fno-signed-zeros -fno-tree-vectorize -fomit-frame-pointer
++CFLAGS:=-O2 -Wall -MMD -fno-asynchronous-unwind-tables -fdata-sections -ffunction-sections -fno-math-errno -fno-signed-zeros -fno-tree-vectorize -fomit-frame-pointer
+ CFLAGS+=-D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -D_REENTRANT
+ CFLAGS+=-I.
+ CFLAGS+=-DCONFIG_BPG_VERSION=\"$(shell cat VERSION)\"
+@@ -53,13 +53,13 @@ EMLDFLAGS+=-s NO_FILESYSTEM=1 -s NO_BROWSER=1
+ EMLDFLAGS+=-O3 --memory-init-file 0 --closure 1 --post-js post.js
+ EMCFLAGS:=$(CFLAGS)
+ 
+-LDFLAGS=-g
++#LDFLAGS=-g
+ ifdef CONFIG_APPLE
+ LDFLAGS+=-Wl,-dead_strip
+ else
+ LDFLAGS+=-Wl,--gc-sections
+ endif
+-CFLAGS+=-g
++#CFLAGS+=-g
+ CXXFLAGS=$(CFLAGS)
+ 
+ PROGS=bpgdec$(EXE) bpgenc$(EXE)
+@@ -77,7 +77,7 @@ hevc_cabac.o  hevc_filter.o  hevc.o         hevcpred.o  hevc_refs.o\
+ hevcdsp.o     hevc_mvs.o     hevc_ps.o   hevc_sei.o\
+ utils.o cabac.o golomb.o videodsp.o )
+ LIBBPG_OBJS+=$(addprefix libavutil/, mem.o buffer.o log2_tab.o frame.o pixdesc.o md5.o )
+-LIBBPG_OBJS+=libbpg.o
++LIBBPG_OBJS+=libbpg.o bpgenc.o
+ 
+ LIBBPG_JS_OBJS:=$(patsubst %.o, %.js.o, $(LIBBPG_OBJS)) tmalloc.js.o
+ 
+@@ -98,8 +98,10 @@ BPGENC_LIBS:=
+ 
+ ifdef USE_X265
+ BPGENC_OBJS+=x265_glue.o
++LIBBPG_OBJS+=x265_glue.o
+ BPGENC_LIBS+= -lx265
+ bpgenc.o: CFLAGS+=-DUSE_X265
++x265_glue.o: CFLAGS+=-I../libx265
+ endif # USE_X265
+ 
+ ifdef USE_JCTVC
+@@ -126,6 +128,7 @@ jctvc/libjctvc.a: $(JCTVC_OBJS)
+ 	$(AR) rcs $@ $^
+ 
+ BPGENC_OBJS+=jctvc_glue.o jctvc/libjctvc.a
++LIBBPG_OBJS+=jctvc_glue.o $(JCTVC_OBJS)
+ 
+ bpgenc.o: CFLAGS+=-DUSE_JCTVC
+ endif # USE_JCTVC
+diff --git a/bpgenc.c b/bpgenc.c
+index c1ccaae..22cc880 100644
+--- a/bpgenc.c
++++ b/bpgenc.c
+@@ -29,10 +29,12 @@
+ #include <math.h>
+ #include <assert.h>
+ 
+-#include <png.h>
+-#include <jpeglib.h>
++//#include <png.h>
++//#include <jpeglib.h>
+ 
+ #include "bpgenc.h"
++#include "dprintf.h"
++#define fprintf(x, ...)     dprintf (__VA_ARGS__)
+ 
+ typedef uint16_t PIXEL;
+ 
+@@ -403,6 +405,44 @@ static RGBConvertFunc *rgb_to_cs[2][BPG_CS_COUNT] = {
+     }
+ };
+     
++
++void bpg_gray8_to_img (Image *dst, const void *_src)
++{
++    const uint8_t *src = _src;
++
++    ColorConvertState cvt;
++    convert_init (&cvt, 8, dst->bit_depth, dst->color_space, 0);
++
++    int y;
++    for (y = 0; y < dst->h; y++)
++    {
++        gray8_to_gray (&cvt,
++            (PIXEL*)(dst->data[0] + y * dst->linesize[0]),
++            src + y * dst->w, dst->w, 1);
++    }
++}
++
++
++void bpg_rgb24_to_img (Image *dst, const void *_src)
++{
++    const uint8_t *src = _src;
++
++    ColorConvertState cvt;
++    convert_init (&cvt, 8, dst->bit_depth, dst->color_space, 0);
++
++    BPGColorSpaceEnum cs = dst->color_space;
++    RGBConvertFunc *f = rgb_to_cs[0][cs];
++    int y;
++    for (y = 0; y < dst->h; y++)
++    {
++        f (&cvt,
++            (PIXEL*)(dst->data[0] + y * dst->linesize[0]),
++            (PIXEL*)(dst->data[1] + y * dst->linesize[1]),
++            (PIXEL*)(dst->data[2] + y * dst->linesize[2]),
++            src + y * dst->w * 3, dst->w, 3);
++    }
++}
++
+ /* val = 1.0 - val */
+ static void gray_one_minus(ColorConvertState *s, PIXEL *y_ptr, int n)
+ {
+@@ -908,6 +948,7 @@ void bpg_md_free(BPGMetaData *md)
+     }
+ }
+ 
++#if 0
+ Image *read_png(BPGMetaData **pmd,
+                 FILE *f, BPGColorSpaceEnum color_space, int out_bit_depth,
+                 int limited_range, int premultiplied_alpha)
+@@ -1454,6 +1495,7 @@ Image *load_image(BPGMetaData **pmd, const char *infilename,
+     *pmd = md;
+     return img;
+ }
++#endif
+ 
+ void save_yuv1(Image *img, FILE *f)
+ {
+@@ -2158,17 +2200,6 @@ static int build_modified_hevc(uint8_t **pout_buf,
+     return -1;
+ }
+ 
+-typedef enum {
+-#if defined(USE_JCTVC)
+-    HEVC_ENCODER_JCTVC,
+-#endif
+-#if defined(USE_X265)
+-    HEVC_ENCODER_X265,
+-#endif
+-
+-    HEVC_ENCODER_COUNT,
+-} HEVCEncoderEnum;
+-
+ static char *hevc_encoder_name[HEVC_ENCODER_COUNT] = {
+ #if defined(USE_JCTVC)
+     "jctvc",
+@@ -2201,28 +2232,6 @@ static HEVCEncoder *hevc_encoder_tab[HEVC_ENCODER_COUNT] = {
+ #define DEFAULT_COMPRESS_LEVEL 8
+ 
+ 
+-typedef struct BPGEncoderContext BPGEncoderContext;
+-
+-typedef struct BPGEncoderParameters {
+-    int qp; /* 0 ... 51 */
+-    int alpha_qp; /* -1 ... 51. -1 means same as qp */
+-    int lossless; /* true if lossless compression (qp and alpha_qp are
+-                     ignored) */
+-    BPGImageFormatEnum preferred_chroma_format;
+-    int sei_decoded_picture_hash; /* 0, 1 */
+-    int compress_level; /* 1 ... 9 */
+-    int verbose;
+-    HEVCEncoderEnum encoder_type;
+-    int animated; /* 0 ... 1: if true, encode as animated image */
+-    uint16_t loop_count; /* animations: number of loops. 0=infinite */
+-    /* animations: the frame delay is a multiple of
+-       frame_delay_num/frame_delay_den seconds */
+-    uint16_t frame_delay_num;
+-    uint16_t frame_delay_den;
+-} BPGEncoderParameters;
+-
+-typedef int BPGEncoderWriteFunc(void *opaque, const uint8_t *buf, int buf_len);
+-
+ struct BPGEncoderContext {
+     BPGEncoderParameters params;
+     BPGMetaData *first_md;
+@@ -2582,6 +2591,7 @@ void bpg_encoder_close(BPGEncoderContext *s)
+     free(s);
+ }
+ 
++#if 0
+ static int my_write_func(void *opaque, const uint8_t *buf, int buf_len)
+ {
+     FILE *f = opaque;
+@@ -2963,3 +2973,4 @@ int main(int argc, char **argv)
+ 
+     return 0;
+ }
++#endif
+diff --git a/bpgenc.h b/bpgenc.h
+index f5708a9..d892e37 100644
+--- a/bpgenc.h
++++ b/bpgenc.h
+@@ -43,6 +43,14 @@ typedef struct {
+     int linesize[4];
+ } Image;
+ 
++Image *image_alloc (int w, int h, BPGImageFormatEnum format, int has_alpha,
++                   BPGColorSpaceEnum color_space, int bit_depth);
++
++void image_free (Image *img);
++
++void bpg_gray8_to_img (Image *dst, const void *src);
++void bpg_rgb24_to_img (Image *dst, const void *src);
++
+ typedef struct {
+     int width;
+     int height;
+@@ -73,6 +81,49 @@ int x265_encode_picture(uint8_t **pbuf, Image *img,
+ void save_yuv1(Image *img, FILE *f);
+ void save_yuv(Image *img, const char *filename);
+ 
++
++typedef struct BPGEncoderContext BPGEncoderContext;
++
++typedef enum {
++#if defined(USE_JCTVC)
++    HEVC_ENCODER_JCTVC,
++#endif
++#if defined(USE_X265)
++    HEVC_ENCODER_X265,
++#endif
++
++    HEVC_ENCODER_COUNT,
++} HEVCEncoderEnum;
++
++typedef struct BPGEncoderParameters {
++    int qp; /* 0 ... 51 */
++    int alpha_qp; /* -1 ... 51. -1 means same as qp */
++    int lossless; /* true if lossless compression (qp and alpha_qp are
++                     ignored) */
++    BPGImageFormatEnum preferred_chroma_format;
++    int sei_decoded_picture_hash; /* 0, 1 */
++    int compress_level; /* 1 ... 9 */
++    int verbose;
++    HEVCEncoderEnum encoder_type;
++    int animated; /* 0 ... 1: if true, encode as animated image */
++    uint16_t loop_count; /* animations: number of loops. 0=infinite */
++    /* animations: the frame delay is a multiple of
++       frame_delay_num/frame_delay_den seconds */
++    uint16_t frame_delay_num;
++    uint16_t frame_delay_den;
++} BPGEncoderParameters;
++
++typedef int BPGEncoderWriteFunc(void *opaque, const uint8_t *buf, int buf_len);
++
++BPGEncoderParameters *bpg_encoder_param_alloc(void);
++void bpg_encoder_param_free(BPGEncoderParameters *p);
++BPGEncoderContext *bpg_encoder_open(BPGEncoderParameters *p);
++
++int bpg_encoder_encode (BPGEncoderContext *s, Image *img,
++   BPGEncoderWriteFunc *write_func, void *opaque);
++
++void bpg_encoder_close(BPGEncoderContext *s);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/dprintf.h b/dprintf.h
+new file mode 100644
+index 0000000..5b7ef2d
+--- /dev/null
++++ b/dprintf.h
+@@ -0,0 +1,37 @@
++/**
++ * @file
++ * Debug printf() for Windows platforem
++ * @author Leav Wu (leavinel@gmail.com)
++ */
++#ifndef _DPRINTF_H_
++#define _DPRINTF_H_
++
++#include <stdio.h>
++
++#ifdef _WIN32
++#include <stdarg.h>
++#include <windows.h>
++
++#ifdef __GNUC__
++static void dprintf (const char s_fmt[], ...) __attribute__((format(printf, 1, 2)));
++#endif // __GNUC__
++
++static void dprintf (const char s_fmt[], ...)
++{
++    char buf[128];
++    va_list ap;
++
++    va_start (ap, s_fmt);
++    vsnprintf (buf, sizeof(buf), s_fmt, ap);
++    va_end (ap);
++
++    OutputDebugStringA (buf);
++}
++
++
++#else // WIN32
++#define dprintf(s_fmt, ...)     fprintf (stderr, s_fmt, __VA_ARGS__)
++#endif // WIN32
++
++
++#endif /* _DPRINTF_H_ */
+diff --git a/libbpg.c b/libbpg.c
+index cea41fd..56c9de1 100644
+--- a/libbpg.c
++++ b/libbpg.c
+@@ -47,8 +47,6 @@
+ #include <assert.h>
+ #include "libbpg.h"
+ 
+-#define BPG_HEADER_MAGIC 0x425047fb
+-
+ #define ITAPS2 4 
+ #define ITAPS (2 * ITAPS2) /* number of taps of the interpolation filter */
+ 
+diff --git a/libbpg.h b/libbpg.h
+index f02b02e..ff8ca2e 100644
+--- a/libbpg.h
++++ b/libbpg.h
+@@ -24,6 +24,8 @@
+ #ifndef _LIBBPG_H
+ #define _LIBBPG_H
+ 
++#define BPG_HEADER_MAGIC 0x425047fb
++
+ typedef struct BPGDecoderContext BPGDecoderContext;
+ 
+ typedef enum {
