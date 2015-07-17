@@ -18,9 +18,13 @@ EXTC BOOL APIENTRY DllMain (HANDLE hModule, DWORD ul_reason_for_call, LPVOID lpR
     {
     case DLL_PROCESS_ATTACH :
         dprintf ("Compiled at %s %s\n", __TIME__, __DATE__);
+        BpgReader::InitClass();
         break;
 
     case DLL_PROCESS_DETACH :
+        BpgReader::DeinitClass();
+        break;
+
     case DLL_THREAD_ATTACH  :
     case DLL_THREAD_DETACH  :
         break;
@@ -138,6 +142,7 @@ EXTC void API gfpLoadPictureExit( void * ptr )
 // bits_per_pixel can be 1 to 8, 24, 32
 EXTC BOOL API gfpSavePictureIsSupported( INT width, INT height, INT bits_per_pixel, BOOL has_colormap )
 {
+    dprintf ("%s [%dx%d] %d bpp, colormap=%u\n", __FUNCTION__, width, height, bits_per_pixel, has_colormap);
     if (bits_per_pixel == 24)
         return TRUE;
 

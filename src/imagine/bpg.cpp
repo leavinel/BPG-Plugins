@@ -163,9 +163,13 @@ EXTC BOOL CALLBACK APIENTRY DllMain(HINSTANCE hInstance,DWORD dwReason,LPVOID lp
     {
     case DLL_PROCESS_ATTACH :
         dprintf ("Compiled at %s %s\n", __TIME__, __DATE__);
+        BpgReader::InitClass();
         break;
 
     case DLL_PROCESS_DETACH :
+        BpgReader::DeinitClass();
+        break;
+
     case DLL_THREAD_ATTACH  :
     case DLL_THREAD_DETACH  :
         break;

@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <string>
+#include <windows.h>
 
 #include "bpg_common.h"
 
@@ -42,7 +43,7 @@ uint8_t BpgImageInfo2::GetBpp() const
  */
 bool BpgImageInfo2::CheckHeader (const void *buf, size_t len)
 {
-    static const uint8_t magic[] = {
+    static const uint8_t magic[HEADER_MAGIC_SIZE] = {
         GETBYTE(BPG_HEADER_MAGIC,3),
         GETBYTE(BPG_HEADER_MAGIC,2),
         GETBYTE(BPG_HEADER_MAGIC,1),
@@ -52,7 +53,7 @@ bool BpgImageInfo2::CheckHeader (const void *buf, size_t len)
     if (len < sizeof(magic))
         return false;
 
-    return 0 == memcmp (&magic, buf, sizeof(magic));
+    return 0 == memcmp (&magic, buf, HEADER_MAGIC_SIZE);
 }
 
 
@@ -89,12 +90,16 @@ void BpgDecoder::GetLine (void *buf)
 }
 
 
-BpgReader::BpgReader(): decodeBuf(NULL), fmt(FORMAT_RGB), bitsPerPixel(0), linesz(0)
+uint8_t *BpgReader::decodeBuf = NULL;
+size_t BpgReader::bufsz = 0;
+
+
+void BpgReader::InitClass()
 {
 }
 
 
-BpgReader::~BpgReader()
+void BpgReader::DeinitClass()
 {
     if (decodeBuf)
     {
@@ -104,8 +109,19 @@ BpgReader::~BpgReader()
 }
 
 
+BpgReader::BpgReader(): fmt(FORMAT_RGB), bitsPerPixel(0), linesz(0)
+{
+}
+
+
+BpgReader::~BpgReader()
+{
+}
+
+
 void BpgReader::LoadFromBuffer (const void *buf, size_t len)
 {
+    DWORD begin = GetTickCount();
     decoder.Decode (info, buf, len);
 
     BPGDecoderOutputFormat out_fmt;
@@ -137,8 +153,18 @@ void BpgReader::LoadFromBuffer (const void *buf, size_t len)
     else
         linesz = info.width * 4;
 
-    this->decodeBuf = new uint8_t [linesz * info.height];
-    uint8_t *p = this->decodeBuf;
+    /* Reallocate buffer if required */
+    size_t min_bufsz = linesz * info.height;
+    if (bufsz < min_bufsz)
+    {
+        if (decodeBuf)
+            delete decodeBuf;
+
+        decodeBuf = new uint8_t [min_bufsz];
+        bufsz = min_bufsz;
+    }
+
+    uint8_t *p = decodeBuf;
 
     decoder.Start (out_fmt);
     for (uint32_t y = 0; y < info.height; y++)
@@ -146,6 +172,9 @@ void BpgReader::LoadFromBuffer (const void *buf, size_t len)
         decoder.GetLine (p);
         p += linesz;
     }
+
+    DWORD dur = GetTickCount() - begin;
+    dprintf ("Decoding time: %lu ms\n", dur);
 }
 
 

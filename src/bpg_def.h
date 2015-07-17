@@ -13,6 +13,7 @@
 #define LIBBPG_VER      "0.9.5"
 #define LIBX265_VER     "1.7"
 #define MODULE_VER      0,0,0,1
+#define MODULE_VER_STR  "0.0.0.1"
 
 
 #endif /* _BPG_DEF_H_ */

@@ -38,6 +38,9 @@ struct BpgImageInfo2: public BPGImageInfo
 
     uint8_t GetBpp() const;
 
+    enum {
+        HEADER_MAGIC_SIZE = 4,
+    };
     static bool CheckHeader (const void *buf, size_t len);
 };
 
@@ -64,7 +67,8 @@ class BpgReader
 {
 private:
     BpgDecoder decoder;
-    uint8_t *decodeBuf;
+    static uint8_t *decodeBuf;
+    static size_t bufsz;
 
     enum {
         FORMAT_GRAY,
@@ -76,6 +80,9 @@ public:
     BpgImageInfo2 info;
     uint8_t bitsPerPixel;
     size_t linesz;
+
+    static void InitClass();
+    static void DeinitClass();
 
     BpgReader();
     ~BpgReader();

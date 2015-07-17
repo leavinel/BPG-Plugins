@@ -1,0 +1,7 @@
+EXPORTS
+	GetPluginInfo
+	IsSupported
+	GetPictureInfo
+	GetPicture
+	GetPreview
+;	ConfigurationDlg
