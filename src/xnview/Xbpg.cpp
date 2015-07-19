@@ -67,12 +67,48 @@ EXTC BOOL API gfpGetPluginInfo (
 }
 
 
+class BpgReaderPrivate: public BpgReader
+{
+public:
+    uint8_t bpp;
+    bool bStarted;
+
+    BpgReaderPrivate(): bpp(0), bStarted(false) {}
+
+    void StartDecode() {
+        BPGDecoderOutputFormat fmt;
+        const int8_t *shuffle;
+        static const int8_t bpp24_shuffle[] = {0, 1, 2};
+        static const int8_t bpp32_shuffle[] = {0, 1, 2, 3};
+        switch (bpp)
+        {
+        case 24:
+            fmt = BPG_OUTPUT_FORMAT_RGB24;
+            shuffle = bpp24_shuffle;
+            break;
+        case 32:
+            fmt = BPG_OUTPUT_FORMAT_RGBA32;
+            shuffle = bpp32_shuffle;
+            break;
+        case 8:
+        default:
+            fmt = BPG_OUTPUT_FORMAT_GRAY8;
+            shuffle = NULL;
+            break;
+        }
+
+        GetDecoder().Start (fmt, shuffle);
+        bStarted = true;
+    }
+};
+
+
 EXTC void *API gfpLoadPictureInit (LPCSTR filename)
 {
     try {
-        BpgReader *pfile = new BpgReader();
-        pfile->LoadFromFile (filename);
-        return pfile;
+        BpgReaderPrivate *preader = new BpgReaderPrivate();
+        preader->LoadFromFile (filename);
+        return preader;
     }
     catch (const exception &e) {
         pr_err (e.what());
@@ -95,28 +131,34 @@ EXTC BOOL API gfpLoadPictureGetInfo (
     INT label_max_size
 )
 {
-    BpgReader &file = *(BpgReader*)ptr;
+    BpgReaderPrivate &reader = *(BpgReaderPrivate*)ptr;
+    BpgDecoder &decoder = reader.GetDecoder();
+    const BpgImageInfo2 &info = decoder.GetInfo();
+    reader.bpp = info.GetBpp();
 
-    BPGImageInfo &info = file.info;
     *pictype = GFP_RGB;
     *width = info.width;
     *height = info.height;
     *dpi = 68;
-    *bits_per_pixel = file.bitsPerPixel;
-    *bytes_per_line = file.linesz;
+    *bits_per_pixel = reader.bpp;
+    *bytes_per_line = info.width * reader.bpp / 8;
     *has_colormap = FALSE;
 
-    file.GetFormatDetail (label, label_max_size);
+    info.GetFormatDetail (label, label_max_size);
     return TRUE;
 }
 
 
 EXTC BOOL API gfpLoadPictureGetLine (void *ptr, INT line, unsigned char *buffer)
 {
-    BpgReader &file = *(BpgReader*)ptr;
+    BpgReaderPrivate &reader = *(BpgReaderPrivate*)ptr;
 
     try {
-        file.GetLine (line, buffer);
+        if (!reader.bStarted)
+            reader.StartDecode();
+
+        BpgDecoder &decoder = reader.GetDecoder();
+        decoder.GetLine (line, buffer);
     }
     catch (const exception &e) {
         pr_err (e.what());
@@ -134,8 +176,8 @@ EXTC BOOL API gfpLoadPictureGetColormap (void *ptr, GFP_COLORMAP * cmap )
 
 EXTC void API gfpLoadPictureExit( void * ptr )
 {
-    BpgReader *pfile = (BpgReader*)ptr;
-    delete pfile;
+    BpgReaderPrivate *preader = (BpgReaderPrivate*)ptr;
+    delete preader;
 }
 
 

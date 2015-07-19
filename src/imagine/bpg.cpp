@@ -65,7 +65,8 @@ static LPIMAGINEBITMAP IMAGINEAPI loadFile(IMAGINEPLUGINFILEINFOTABLE *fileInfoT
     try {
         if (flags & IMAGINELOADPARAM_GETINFO)
         {
-            BpgImageInfo2 info (loadParam->buffer, loadParam->length);
+            BpgImageInfo2 info;
+            info.LoadFromBuffer (loadParam->buffer, loadParam->length);
             uint8_t bpp = info.GetBpp();
             dprintf ("%s [%ux%u] @ %u bpp flags%X\n", __FUNCTION__, info.width, info.height, bpp, flags);
             LPIMAGINEBITMAP bitmap = iface->lpVtbl->Create (info.width, info.height, bpp, flags);
@@ -81,9 +82,11 @@ static LPIMAGINEBITMAP IMAGINEAPI loadFile(IMAGINEPLUGINFILEINFOTABLE *fileInfoT
         BpgReader reader;
         reader.LoadFromBuffer (loadParam->buffer, loadParam->length);
 
-        const BPGImageInfo &info = reader.info;
-        dprintf ("%s [%ux%u] @ %u bpp flags%X\n", __FUNCTION__, info.width, info.height, reader.bitsPerPixel, flags);
-        LPIMAGINEBITMAP bitmap = iface->lpVtbl->Create (info.width, info.height, reader.bitsPerPixel, flags);
+        BpgDecoder &decoder = reader.GetDecoder();
+        const BpgImageInfo2 &info = decoder.GetInfo();
+        int bpp = info.GetBpp();
+        dprintf ("%s [%ux%u] @ %u bpp flags%X\n", __FUNCTION__, info.width, info.height, bpp, flags);
+        LPIMAGINEBITMAP bitmap = iface->lpVtbl->Create (info.width, info.height, bpp, flags);
         if (!bitmap)
         {
             loadParam->errorCode = IMAGINEERROR_OUTOFMEMORY;
@@ -91,8 +94,31 @@ static LPIMAGINEBITMAP IMAGINEAPI loadFile(IMAGINEPLUGINFILEINFOTABLE *fileInfoT
         }
 
         /* If grayscale, set palette */
-        if (reader.bitsPerPixel == 8)
+        if (bpp == 8)
             iface->lpVtbl->SetPalette (bitmap, get_gray_palette());
+
+        BPGDecoderOutputFormat fmt;
+        const int8_t *shuffle;
+        static const int8_t bpp24_shuffle[] = {2, 1, 0};
+        static const int8_t bpp32_shuffle[] = {2, 1, 0, 3};
+        switch (bpp)
+        {
+        case 24:
+            fmt = BPG_OUTPUT_FORMAT_RGB24;
+            shuffle = bpp24_shuffle;
+            break;
+        case 32:
+            fmt = BPG_OUTPUT_FORMAT_RGBA32;
+            shuffle = bpp32_shuffle;
+            break;
+        case 8:
+        default:
+            fmt = BPG_OUTPUT_FORMAT_GRAY8;
+            shuffle = NULL;
+            break;
+        }
+
+        decoder.Start (fmt, shuffle);
 
         IMAGINECALLBACKPARAM cb;
         cb.dib = bitmap;
@@ -102,8 +128,7 @@ static LPIMAGINEBITMAP IMAGINEAPI loadFile(IMAGINEPLUGINFILEINFOTABLE *fileInfoT
         for (uint32_t y = 0; y < info.height; y++)
         {
             uint8_t *dst = (uint8_t*)iface->lpVtbl->GetLineBits (bitmap, y);
-            static const uint8_t rgba_offset[] = {2,1,0,3};
-            reader.GetLine (y, dst, rgba_offset);
+            decoder.GetLine (y, dst);
 
             cb.current = y;
             if ( (flags&IMAGINELOADPARAM_CALLBACK) && (!loadParam->callback.proc(&cb)))

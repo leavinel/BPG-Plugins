@@ -77,14 +77,14 @@ EXTC int __stdcall GetPictureInfo
             reader.LoadFromBuffer (buf, len);
         }
 
-        const BpgImageInfo2 &info = reader.info;
+        const BpgImageInfo2 &info = reader.GetDecoder().GetInfo();
         lpInfo->left        = 0;
         lpInfo->top         = 0;
         lpInfo->width       = info.width;
         lpInfo->height      = info.height;
         lpInfo->x_density   = 0;
         lpInfo->y_density   = 0;
-        lpInfo->colorDepth  = reader.bitsPerPixel;
+        lpInfo->colorDepth  = info.GetBpp();
         lpInfo->hInfo       = NULL;
 
         ret = SPI_ALL_RIGHT;
@@ -115,19 +115,22 @@ EXTC int __stdcall GetPicture(
             reader.LoadFromBuffer (buf, len);
         }
 
+        BpgDecoder &decoder = reader.GetDecoder();
+        const BpgImageInfo2 &info = decoder.GetInfo();
+        int bpp = info.GetBpp();
+
         if (lpPrgressCallback)
             lpPrgressCallback (1, 2, lData); // 50%
 
         /* Allocate BITMAPINFO & image buffer */
         size_t infosz;
 
-        if (8 == reader.bitsPerPixel)
+        if (8 == bpp)
             infosz = offsetof(BITMAPINFO, bmiColors[256]);
         else
             infosz = offsetof(BITMAPINFO, bmiColors);
 
-        const BpgImageInfo2 &info = reader.info;
-        size_t linesz = ALIGN (info.width * reader.bitsPerPixel / 8, 4);
+        size_t linesz = ALIGN (info.width * bpp / 8, 4);
         size_t imgsz = linesz * info.height;
         BITMAPINFO *pbmpinfo;
         void *buf;
@@ -154,10 +157,10 @@ EXTC int __stdcall GetPicture(
             hdr.biWidth         = info.width;
             hdr.biHeight        = info.height;
             hdr.biPlanes        = 1;
-            hdr.biBitCount      = reader.bitsPerPixel;
+            hdr.biBitCount      = bpp;
             hdr.biCompression   = BI_RGB;
 
-            if (8 == reader.bitsPerPixel)
+            if (8 == bpp)
             {
                 for (int i = 0; i < 256; i++)
                 {
@@ -168,15 +171,37 @@ EXTC int __stdcall GetPicture(
                 }
             }
 
-            static const uint8_t rgba_offset[] = {2,1,0,3};
+            BPGDecoderOutputFormat fmt;
+            const int8_t *shuffle;
+            static const int8_t bpp24_shuffle[] = {2, 1, 0};
+            static const int8_t bpp32_shuffle[] = {2, 1, 0, 3};
+            switch (bpp)
+            {
+            case 24:
+                fmt = BPG_OUTPUT_FORMAT_RGB24;
+                shuffle = bpp24_shuffle;
+                break;
+            case 32:
+                fmt = BPG_OUTPUT_FORMAT_RGBA32;
+                shuffle = bpp32_shuffle;
+                break;
+            case 8:
+            default:
+                fmt = BPG_OUTPUT_FORMAT_GRAY8;
+                shuffle = NULL;
+                break;
+            }
+
+            decoder.Start (fmt, shuffle);
+
             uint8_t *bufline = (uint8_t*)buf + linesz * info.height;
-            for (size_t i = 0; i < info.height; i++)
+            for (size_t y = 0; y < info.height; y++)
             {
                 bufline -= linesz;
-                reader.GetLine (i, bufline, rgba_offset);
+                decoder.GetLine (y, bufline);
 
                 if (lpPrgressCallback)
-                    lpPrgressCallback (info.height + i, info.height*2, lData);
+                    lpPrgressCallback (info.height + y, info.height*2, lData);
             }
         }
 

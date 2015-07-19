@@ -34,9 +34,11 @@ void dprintf (const char s_fmt[], ...) __attribute__((format(printf, 1, 2)));
 struct BpgImageInfo2: public BPGImageInfo
 {
     BpgImageInfo2(){}
-    BpgImageInfo2 (const void *buf, size_t len);
 
+    void LoadFromBuffer (const void *buf, size_t len);
     uint8_t GetBpp() const;
+    void GetFormatDetail (char buf[], size_t sz) const;
+    void GetFormatDetail (std::string &s) const;
 
     enum {
         HEADER_MAGIC_SIZE = 4,
@@ -49,14 +51,16 @@ class BpgDecoder
 {
 private:
     BPGDecoderContext *ctx;
+    BpgImageInfo2 info;
 
 public:
     BpgDecoder();
     ~BpgDecoder();
 
-    void Decode (BpgImageInfo2 &info, const void *buf, size_t len);
-    void Start (BPGDecoderOutputFormat out_fmt);
-    void GetLine (void *buf);
+    void Decode (const void *buf, size_t len);
+    const BpgImageInfo2& GetInfo() const { return info; }
+    void Start (BPGDecoderOutputFormat out_fmt, const int8_t *shuffle);
+    void GetLine (int y, void *buf);
 };
 
 
@@ -67,30 +71,16 @@ class BpgReader
 {
 private:
     BpgDecoder decoder;
-    static uint8_t *decodeBuf;
-    static size_t bufsz;
-
-    enum {
-        FORMAT_GRAY,
-        FORMAT_RGB,
-        FORMAT_RGBA,
-    } fmt;
 
 public:
-    BpgImageInfo2 info;
-    uint8_t bitsPerPixel;
-    size_t linesz;
-
     static void InitClass();
     static void DeinitClass();
 
-    BpgReader();
-    ~BpgReader();
+    BpgReader(){}
+    ~BpgReader(){}
     void LoadFromFile (const char s_file[]);
     void LoadFromBuffer (const void *buf, size_t len);
-    void GetFormatDetail (char buf[], size_t sz) const;
-    void GetFormatDetail (std::string &s) const;
-    void GetLine (int line, void *dst, const uint8_t rgba_offset[] = NULL) const;
+    BpgDecoder& GetDecoder() { return decoder; }
 };
 
 
