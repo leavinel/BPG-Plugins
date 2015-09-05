@@ -1,0 +1,3 @@
+[submodule "libbpg-0.9.5"]
+	path = libbpg-0.9.5
+	url = https://github.com/leavinel/libbpg-mod.git

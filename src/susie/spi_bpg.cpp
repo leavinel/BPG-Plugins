@@ -8,6 +8,7 @@
 #include <string.h>
 #include <stddef.h>
 #include <exception>
+#include <windows.h>
 
 extern "C" {
 #include "spi00in.h"

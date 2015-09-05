@@ -79,13 +79,23 @@ $(common_LIB): $(common_OBJ)
 
 
 ### Targets ###
-.PHONY: all clean $(MODULES)
+.PHONY: all clean test libbpg $(MODULES)
 .DEFAULT_GOAL = all
 
 all: $(MODULES)
 
 clean:
 	rm -rf obj
+
+test: obj/read_test.exe
+
+libbpg:
+	cd libbpg-0.9.5; make libbpg.a
+
+obj/read_test.exe: $(CPPFLAGS)+=-I../src -I../$(bpg_PATH)
+
+obj/read_test.exe: test/read_test.cpp $(common_LIB) $(libbpg_LIB) $(libx265_LIB)
+	$(CXX) $(CPPFLAGS) $(CFLAGS) $(CXXFLAGS) $(LDFLAGS) $^ -o $@
 
 $(MODULES_OUT): $(common_LIB) $(libbpg_LIB) $(libx265_LIB)
 
