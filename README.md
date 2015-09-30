@@ -32,6 +32,18 @@ Supported options (see: [bpgenc](http://bellard.org/bpg/)):
 - `-e (jctvc|x265)` select the HEVC encoder (default=`jctvc`)
 - `-m (1~9)` select the compression level (1=fast, 9=slow, default=`8`)
 
+
+## Susie Plugin (for Hamana, etc.)
+http://www.digitalpad.co.jp/~takechin/
+
+Features:
+- BPG read support
+
+Install instructions:
+
+0. Download `BPG-Susie-XXX.7z` from [Releases](https://github.com/leavinel/bpg_plugins/releases)
+0. Extract files into corresponding plugin directory of your image viewers
+
 ## Imagine (32-bit only)
 http://www.nyam.pe.kr/blog/entry/Imagine
 
