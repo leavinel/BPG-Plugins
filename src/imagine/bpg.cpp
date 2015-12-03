@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <exception>
 #include <windows.h>
-#include "bpg_common.h"
+#include "bpg_common.hpp"
 
 extern "C" {
 #include "ImagPlug.h"

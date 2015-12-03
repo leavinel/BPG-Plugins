@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <windows.h>
 
-#include "bpg_common.h"
+#include "bpg_common.hpp"
 
 using namespace std;
 
@@ -97,7 +97,7 @@ public:
             break;
         }
 
-        GetDecoder().Start (fmt, shuffle);
+        GetDecoder().Start (fmt, shuffle, true);
         bStarted = true;
     }
 };

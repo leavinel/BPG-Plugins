@@ -5,8 +5,8 @@
  * @author Leav Wu (leavinel@gmail.com)
  */
 
-#ifndef _BPG_COMMON_H_
-#define _BPG_COMMON_H_
+#ifndef _BPG_COMMON_HPP_
+#define _BPG_COMMON_HPP_
 
 
 #include <stdint.h>
@@ -59,7 +59,7 @@ public:
 
     void Decode (const void *buf, size_t len);
     const BpgImageInfo2& GetInfo() const { return info; }
-    void Start (BPGDecoderOutputFormat out_fmt, const int8_t *shuffle);
+    void Start (BPGDecoderOutputFormat out_fmt, const int8_t *shuffle, bool hq_output = true);
     void GetLine (int y, void *buf);
 };
 
@@ -162,4 +162,4 @@ public:
 };
 
 
-#endif /* _BPG_COMMON_H_ */
+#endif /* _BPG_COMMON_HPP_ */

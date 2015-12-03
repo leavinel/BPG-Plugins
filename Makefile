@@ -17,7 +17,7 @@ CFLAGS += -Wall
 LDFLAGS += 
 
 ifeq ($(DEBUG),1)
-CFLAGS += -O0 -g
+CFLAGS += -O0
 else
 CFLAGS += -O2 -march=i686
 endif
@@ -110,8 +110,8 @@ obj/%.o: $(common_H)
 obj/%.a:
 	$(AR) rcs $@ $^
 
-obj/%.c.o: src/%.cpp
-	$(GCC) -c $(CPPFLAGS) $(CFLAGS) $(CXXFLAGS) $< -o $@
+obj/%.c.o: src/%.c
+	$(GCC) -c $(CPPFLAGS) $(CFLAGS) $< -o $@
 
 obj/%.cpp.o: src/%.cpp
 	$(CXX) -c $(CPPFLAGS) $(CFLAGS) $(CXXFLAGS) $< -o $@

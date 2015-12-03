@@ -4,8 +4,8 @@
  *
  * @author Leav Wu (leavinel@gmail.com)
  */
-#ifndef _BENCHMARK_H_
-#define _BENCHMARK_H_
+#ifndef _BENCHMARK_HPP_
+#define _BENCHMARK_HPP_
 
 #include <stdio.h>
 #include <windows.h>
@@ -25,4 +25,4 @@ public:
 };
 
 
-#endif /* _BENCHMARK_H_ */
+#endif /* _BENCHMARK_HPP_ */

@@ -14,7 +14,7 @@ extern "C" {
 #include "spi00in.h"
 }
 
-#include "bpg_common.h"
+#include "bpg_common.hpp"
 
 
 #define NELEM(ary)      ((size_t)(sizeof(ary)/sizeof(ary[0])))
@@ -96,10 +96,10 @@ EXTC int __stdcall GetPictureInfo
     return ret;
 }
 
-EXTC int __stdcall GetPicture(
-        LPSTR buf, long len, unsigned int flag,
+
+static int read_image (LPSTR buf, long len, unsigned int flag,
         HANDLE *pHBInfo, HANDLE *pHBm,
-        SPI_PROGRESS lpPrgressCallback, long lData)
+        SPI_PROGRESS lpPrgressCallback, long lData, bool hq_output)
 {
     int ret = SPI_OTHER_ERROR;
     BpgReader reader;
@@ -193,7 +193,7 @@ EXTC int __stdcall GetPicture(
                 break;
             }
 
-            decoder.Start (fmt, shuffle);
+            decoder.Start (fmt, shuffle, hq_output);
 
             uint8_t *bufline = (uint8_t*)buf + linesz * info.height;
             for (size_t y = 0; y < info.height; y++)
@@ -231,15 +231,24 @@ fail_alloc_info:
         pr_err (e.what());
     }
 
-    return ret;
+    return ret;}
+
+
+EXTC int __stdcall GetPicture(
+        LPSTR buf, long len, unsigned int flag,
+        HANDLE *pHBInfo, HANDLE *pHBm,
+        SPI_PROGRESS lpPrgressCallback, long lData)
+{
+    return read_image (buf, len, flag, pHBInfo, pHBm, lpPrgressCallback, lData, true);
 }
+
 
 EXTC int __stdcall GetPreview(
     LPSTR buf, long len, unsigned int flag,
     HANDLE *pHBInfo, HANDLE *pHBm,
     SPI_PROGRESS lpPrgressCallback, long lData)
 {
-    return SPI_NO_FUNCTION;
+    return read_image (buf, len, flag, pHBInfo, pHBm, lpPrgressCallback, lData, false);
 }
 
 

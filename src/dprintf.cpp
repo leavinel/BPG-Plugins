@@ -9,7 +9,7 @@
 #include <stdarg.h>
 #include <windows.h>
 
-#include "bpg_common.h"
+#include "bpg_common.hpp"
 
 
 /**

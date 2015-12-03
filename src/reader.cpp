@@ -10,7 +10,7 @@
 #include <string>
 #include <windows.h>
 
-#include "bpg_common.h"
+#include "bpg_common.hpp"
 
 #define GETBYTE(val,n)      (((val) >> ((n) * 8)) & 0xFF)
 
@@ -81,9 +81,9 @@ void BpgDecoder::Decode (const void *buf, size_t len)
     FAIL_THROW (bpg_decoder_get_info (ctx, &info));
 }
 
-void BpgDecoder::Start (BPGDecoderOutputFormat out_fmt, const int8_t *shuffle)
+void BpgDecoder::Start (BPGDecoderOutputFormat out_fmt, const int8_t *shuffle, bool hq_output)
 {
-    FAIL_THROW (bpg_decoder_start (ctx, out_fmt, shuffle));
+    FAIL_THROW (bpg_decoder_start (ctx, out_fmt, shuffle, hq_output));
 }
 
 void BpgDecoder::GetLine (int y, void *buf)

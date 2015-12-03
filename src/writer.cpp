@@ -12,7 +12,7 @@
 #include <windows.h>
 #include <psapi.h>
 
-#include "bpg_common.h"
+#include "bpg_common.hpp"
 
 #define INI_PATH        "Plugins\\Xbpg.ini"
 
