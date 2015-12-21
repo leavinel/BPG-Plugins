@@ -10,7 +10,9 @@ What is BPG format?
 http://www.xnview.com/
 
 Features:
-- BPG read /write support
+- BPG read support
+- BPG write support (8-bit grayscale / 24-bit colour)
+- Do not support writing from 8-bit colour / 32-bit source images
 - Do not support animation
 
 Install instructions:
@@ -70,4 +72,4 @@ Ver: 0.9.5
 ## libx265
 http://x265.org/
 
-Ver: 0.7
+Ver: 1.8
