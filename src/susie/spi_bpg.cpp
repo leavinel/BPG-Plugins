@@ -15,12 +15,15 @@ extern "C" {
 }
 
 #include "bpg_common.hpp"
+#include "benchmark.hpp"
+#include "looptask.hpp"
 
 
 #define NELEM(ary)      ((size_t)(sizeof(ary)/sizeof(ary[0])))
 #define ALIGN(x,n)      ((((x) + ((n)-1)) / (n)) * (n))
 
 using namespace std;
+using namespace bpg;
 
 
 EXTC int __stdcall GetPluginInfo(int infono, LPSTR buf, int buflen)
@@ -32,7 +35,7 @@ EXTC int __stdcall GetPluginInfo(int infono, LPSTR buf, int buflen)
         FORMAT_NAME,        // File format
     };
 
-    if (infono < 0 || infono >= NELEM(pluginfo))
+    if (infono < 0 || infono >= (int)NELEM(pluginfo))
         return 0;
 
     lstrcpyn(buf, pluginfo[infono], buflen);
@@ -43,7 +46,7 @@ EXTC int __stdcall GetPluginInfo(int infono, LPSTR buf, int buflen)
 EXTC int __stdcall IsSupported(LPSTR filename, DWORD dw)
 {
     char *data;
-    char buff[BpgImageInfo2::HEADER_MAGIC_SIZE];
+    char buff[ImageInfo::HEADER_MAGIC_SIZE];
     DWORD ReadBytes;
 
     if ((dw & 0xFFFF0000) == 0) {
@@ -57,7 +60,7 @@ EXTC int __stdcall IsSupported(LPSTR filename, DWORD dw)
         data = (char*)dw;
     }
 
-    if (BpgImageInfo2::CheckHeader (data, sizeof(buff)))
+    if (ImageInfo::CheckHeader (data, sizeof(buff)))
         return 1;
 
     return 0;
@@ -67,18 +70,18 @@ EXTC int __stdcall GetPictureInfo
 (LPSTR buf, long len, unsigned int flag, struct PictureInfo *lpInfo)
 {
     int ret = SPI_OTHER_ERROR;
-    BpgReader reader;
+    Decoder dec;
 
     try {
         if ((flag & 7) == 0) {
         /* buf is the filename */
-            reader.LoadFromFile (buf);
+            dec.DecodeFile (buf, Decoder::OPT_HEADER_ONLY);
         } else {
         /* buf is the pointer to buffer */
-            reader.LoadFromBuffer (buf, len);
+            dec.DecodeBuffer (buf, len, Decoder::OPT_HEADER_ONLY);
         }
 
-        const BpgImageInfo2 &info = reader.GetDecoder().GetInfo();
+        const ImageInfo &info = dec.GetInfo();
         lpInfo->left        = 0;
         lpInfo->top         = 0;
         lpInfo->width       = info.width;
@@ -90,7 +93,7 @@ EXTC int __stdcall GetPictureInfo
 
         ret = SPI_ALL_RIGHT;
     } catch (const exception &e) {
-        pr_err (e.what());
+        Loge (e.what());
     }
 
     return ret;
@@ -102,22 +105,25 @@ static int read_image (LPSTR buf, long len, unsigned int flag,
         SPI_PROGRESS lpPrgressCallback, long lData, bool hq_output)
 {
     int ret = SPI_OTHER_ERROR;
-    BpgReader reader;
+    Decoder dec;
 
     if (lpPrgressCallback)
         lpPrgressCallback (0, 1, lData);
 
     try {
-        if ((flag & 7) == 0) {
-        /* buf is the filename */
-            reader.LoadFromFile (buf);
-        } else {
-        /* buf is the pointer to buffer */
-            reader.LoadFromBuffer (buf, len);
+        {
+            Benchmark bm ("BPG decode");
+
+            if ((flag & 7) == 0) {
+            /* buf is the filename */
+                dec.DecodeFile (buf);
+            } else {
+            /* buf is the pointer to buffer */
+                dec.DecodeBuffer (buf, len);
+            }
         }
 
-        BpgDecoder &decoder = reader.GetDecoder();
-        const BpgImageInfo2 &info = decoder.GetInfo();
+        const ImageInfo &info = dec.GetInfo();
         int bpp = info.GetBpp();
 
         if (lpPrgressCallback)
@@ -193,17 +199,37 @@ static int read_image (LPSTR buf, long len, unsigned int flag,
                 break;
             }
 
-            decoder.Start (fmt, shuffle, hq_output);
+            Benchmark bm ("BPG post-process");
+            dec.Start (fmt, shuffle, hq_output);
 
-            uint8_t *bufline = (uint8_t*)buf + linesz * info.height;
-            for (size_t y = 0; y < info.height; y++)
+            class task: public LoopTask
             {
-                bufline -= linesz;
-                decoder.GetLine (y, bufline);
+            private:
+                Decoder &dec;
+                uint8_t *buf;
+                size_t linesz;
+                uint16_t h;
 
-                if (lpPrgressCallback)
-                    lpPrgressCallback (info.height + y, info.height*2, lData);
-            }
+            public:
+                task (Decoder &dec, uint8_t *buf, size_t linesz, size_t h):
+                    dec(dec), buf(buf), linesz(linesz), h(h) {}
+
+                virtual void loop (int begin, int end, int step) override {
+                    DecodeBuffer dbuf (&dec, begin);
+
+                    /* Framebuffer is upside-down */
+                    uint8_t *bufline = (uint8_t*)buf + linesz * (h - begin);
+
+                    for (int y = begin; y < end; y++)
+                    {
+                        bufline -= linesz;
+                        dbuf.GetLine (bufline);
+                    }
+                }
+            };
+
+            LoopTaskSet set (gThreadPool, 0, info.height, 1, MIN_LINES_PER_TASK);
+            set.Dispatch<task> (dec, (uint8_t*)buf, linesz, info.height);
         }
 
         if (lpPrgressCallback)
@@ -228,7 +254,7 @@ fail_alloc_info:
         ;
     }
     catch (const exception &e) {
-        pr_err (e.what());
+        Loge (e.what());
     }
 
     return ret;}
@@ -257,12 +283,12 @@ EXTC BOOL APIENTRY DllMain(HANDLE hModule, DWORD ul_reason, LPVOID lpReserved)
     switch (ul_reason)
     {
     case DLL_PROCESS_ATTACH:
-        dprintf ("Compiled at %s %s\n", __TIME__, __DATE__);
-        BpgReader::InitClass();
+        Logi ("Compiled at %s %s\n", __TIME__, __DATE__);
+        gThreadPool = new ThreadPool;
         break;
 
     case DLL_PROCESS_DETACH:
-        BpgReader::DeinitClass();
+        delete gThreadPool;
         break;
 
     default:

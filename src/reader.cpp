@@ -8,25 +8,33 @@
 #include <stdio.h>
 #include <string.h>
 #include <string>
+#include <vector>
+
 #include <windows.h>
 
 #include "bpg_common.hpp"
+#include "threadpool.hpp"
+
 
 #define GETBYTE(val,n)      (((val) >> ((n) * 8)) & 0xFF)
 
 using namespace std;
+using namespace bpg;
+
+
+ThreadPool *gThreadPool;
 
 
 /**
  * Load a BPG image info from buffer
  */
-void BpgImageInfo2::LoadFromBuffer (const void *buf, size_t len)
+void ImageInfo::LoadFromBuffer (const void *buf, size_t len)
 {
     FAIL_THROW (bpg_decoder_get_info_from_buf (this, NULL, (uint8_t*)buf, len));
 }
 
 
-uint8_t BpgImageInfo2::GetBpp() const
+uint8_t ImageInfo::GetBpp() const
 {
     if (format == BPG_FORMAT_GRAY)
         return 8;
@@ -41,7 +49,7 @@ uint8_t BpgImageInfo2::GetBpp() const
 /**
  * Check if header magic number matches
  */
-bool BpgImageInfo2::CheckHeader (const void *buf, size_t len)
+bool ImageInfo::CheckHeader (const void *buf, size_t len)
 {
     static const uint8_t magic[HEADER_MAGIC_SIZE] = {
         GETBYTE(BPG_HEADER_MAGIC,3),
@@ -57,58 +65,53 @@ bool BpgImageInfo2::CheckHeader (const void *buf, size_t len)
 }
 
 
-BpgDecoder::BpgDecoder(): ctx(NULL)
+Decoder::Decoder(): ctx(bpg_decoder_open(), bpg_decoder_close)
 {
-    ctx = bpg_decoder_open();
     if (!ctx)
         throw runtime_error ("bpg_decoder_open");
 }
 
-BpgDecoder::~BpgDecoder()
+
+void Decoder::DecodeBuffer (const void *buf, size_t len, uint8_t opts)
 {
-    if (ctx)
+    BPGDecoderContext *ctx2 = ctx.get();
+
+    if (opts & OPT_HEADER_ONLY)
     {
-        bpg_decoder_close (ctx);
-        ctx = NULL;
+        FAIL_THROW (bpg_decoder_decode_header_only (ctx2, (uint8_t*)buf, len));
     }
+    else
+    {
+        FAIL_THROW (bpg_decoder_decode (ctx2, (uint8_t*)buf, len));
+    }
+
+    FAIL_THROW (bpg_decoder_get_info (ctx2, &info));
 }
 
-void BpgDecoder::Decode (const void *buf, size_t len)
+
+void Decoder::Start (BPGDecoderOutputFormat out_fmt, const int8_t *shuffle, bool hq_output)
 {
-    DWORD begin = GetTickCount();
-    FAIL_THROW (bpg_decoder_decode (ctx, (uint8_t*)buf, len));
-    dprintf ("bpg_decoder_decode time: %lu ms\n", GetTickCount() - begin);
-    FAIL_THROW (bpg_decoder_get_info (ctx, &info));
-}
-
-void BpgDecoder::Start (BPGDecoderOutputFormat out_fmt, const int8_t *shuffle, bool hq_output)
-{
-    FAIL_THROW (bpg_decoder_start (ctx, out_fmt, shuffle, hq_output));
-}
-
-void BpgDecoder::GetLine (int y, void *buf)
-{
-    FAIL_THROW (bpg_decoder_get_line (ctx, y, buf));
+    FAIL_THROW (bpg_decoder_start (ctx.get(), out_fmt, shuffle, hq_output));
 }
 
 
-void BpgReader::InitClass()
+
+DecodeBuffer::DecodeBuffer (Decoder *dec, uint16_t y_start):
+    ctx(dec->GetContext()),
+    buf(bpg_decoder_alloc_buffer (ctx.get(), y_start), bpg_decoder_free_buffer),
+    y(y_start)
 {
 }
 
 
-void BpgReader::DeinitClass()
+void DecodeBuffer::GetLine (void *dst)
 {
+    FAIL_THROW (bpg_decoder_get_line (ctx.get(), buf.get(), dst));
+    y++;
 }
 
 
-void BpgReader::LoadFromBuffer (const void *buf, size_t len)
-{
-    decoder.Decode (buf, len);
-}
-
-
-void BpgReader::LoadFromFile (const char s_file[])
+void Decoder::DecodeFile (const char s_file[], uint8_t opts)
 {
     FILE *fp = fopen (s_file, "rb");
 
@@ -119,25 +122,17 @@ void BpgReader::LoadFromFile (const char s_file[])
     size_t fsize = ftell (fp);
     fseek (fp, 0, SEEK_SET);
 
-    uint8_t *buf = new uint8_t [fsize];
+    vector<uint8_t> buf (fsize);
 
-    if (fsize != fread (buf, 1, fsize, fp))
+    if (fsize != fread (&buf[0], 1, fsize, fp))
         throw runtime_error ("Failed to read file");
 
     fclose (fp);
-
-    try {
-        LoadFromBuffer (buf, fsize);
-        delete buf;
-    }
-    catch (const exception &e) {
-        delete buf;
-        throw e;
-    }
+    DecodeBuffer (&buf[0], fsize, opts);
 }
 
 
-void BpgImageInfo2::GetFormatDetail (char buf[], size_t sz) const
+void ImageInfo::GetFormatDetail (char buf[], size_t sz) const
 {
     static const char *s_fmt[] = {
         "Grayscale",
@@ -159,7 +154,7 @@ void BpgImageInfo2::GetFormatDetail (char buf[], size_t sz) const
 }
 
 
-void BpgImageInfo2::GetFormatDetail (string &s) const
+void ImageInfo::GetFormatDetail (string &s) const
 {
     char buf[128];
     GetFormatDetail (buf, sizeof(buf));

@@ -1,6 +1,6 @@
 /**
  * @file
- *
+ * Log API
  *
  * @author Leav Wu (leavinel@gmail.com)
  */
@@ -9,13 +9,13 @@
 #include <stdarg.h>
 #include <windows.h>
 
-#include "bpg_common.hpp"
+#include "log.h"
 
 
 /**
  * Print error message
  */
-void pr_err (const char s_fmt[], ...)
+void Loge (const char s_fmt[], ...)
 {
     va_list ap;
     char buf[256];
@@ -31,7 +31,7 @@ void pr_err (const char s_fmt[], ...)
 /**
  * Print debug message to debugger
  */
-void dprintf (const char s_fmt[], ...)
+void Logi (const char s_fmt[], ...)
 {
     va_list ap;
     char buf[256];
@@ -40,5 +40,6 @@ void dprintf (const char s_fmt[], ...)
     vsnprintf (buf, sizeof(buf), s_fmt, ap);
     va_end (ap);
 
+    strncat (buf, "\n", sizeof(buf));
     OutputDebugStringA (buf);
 }

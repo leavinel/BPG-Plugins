@@ -68,7 +68,7 @@ static LPIMAGINEBITMAP IMAGINEAPI loadFile(IMAGINEPLUGINFILEINFOTABLE *fileInfoT
             BpgImageInfo2 info;
             info.LoadFromBuffer (loadParam->buffer, loadParam->length);
             uint8_t bpp = info.GetBpp();
-            dprintf ("%s [%ux%u] @ %u bpp flags%X\n", __FUNCTION__, info.width, info.height, bpp, flags);
+            Logi ("%s [%ux%u] @ %u bpp flags%X\n", __FUNCTION__, info.width, info.height, bpp, flags);
             LPIMAGINEBITMAP bitmap = iface->lpVtbl->Create (info.width, info.height, bpp, flags);
             if (!bitmap)
             {
@@ -85,7 +85,7 @@ static LPIMAGINEBITMAP IMAGINEAPI loadFile(IMAGINEPLUGINFILEINFOTABLE *fileInfoT
         BpgDecoder &decoder = reader.GetDecoder();
         const BpgImageInfo2 &info = decoder.GetInfo();
         int bpp = info.GetBpp();
-        dprintf ("%s [%ux%u] @ %u bpp flags%X\n", __FUNCTION__, info.width, info.height, bpp, flags);
+        Logi ("%s [%ux%u] @ %u bpp flags%X\n", __FUNCTION__, info.width, info.height, bpp, flags);
         LPIMAGINEBITMAP bitmap = iface->lpVtbl->Create (info.width, info.height, bpp, flags);
         if (!bitmap)
         {
@@ -141,7 +141,7 @@ static LPIMAGINEBITMAP IMAGINEAPI loadFile(IMAGINEPLUGINFILEINFOTABLE *fileInfoT
         return bitmap;
     }
     catch (const exception &e) {
-        pr_err (e.what());
+        Loge (e.what());
         loadParam->errorCode = IMAGINEERROR_READERROR;
         return NULL;
     }
@@ -187,7 +187,7 @@ EXTC BOOL CALLBACK APIENTRY DllMain(HINSTANCE hInstance,DWORD dwReason,LPVOID lp
     switch (dwReason)
     {
     case DLL_PROCESS_ATTACH :
-        dprintf ("Compiled at %s %s\n", __TIME__, __DATE__);
+        Logi ("Compiled at %s %s\n", __TIME__, __DATE__);
         BpgReader::InitClass();
         break;
 

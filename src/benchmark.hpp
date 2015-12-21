@@ -9,6 +9,7 @@
 
 #include <stdio.h>
 #include <windows.h>
+#include "log.h"
 
 
 class Benchmark
@@ -20,7 +21,7 @@ public:
     Benchmark (const char *s_msg): sMsg(s_msg), begin(GetTickCount()) {}
 
     ~Benchmark() {
-        printf ("%s: %lu ms\n", sMsg, GetTickCount() - begin);
+        Logi ("%s: %lu ms\n", sMsg, GetTickCount() - begin);
     }
 };
 

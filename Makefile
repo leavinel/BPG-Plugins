@@ -12,12 +12,13 @@ GCC = gcc
 CXX = g++
 RC = windres
 
-CPPFLAGS += -DUSE_JCTVC -DUSE_X265 -I$(bpg_PATH) -Isrc
+CPPFLAGS += -DUSE_JCTVC -DUSE_X265 -I$(bpg_PATH) -Isrc -std=c++11
 CFLAGS += -Wall
-LDFLAGS += 
+LDFLAGS +=
+DEPFLAGS = -MMD -MF $(subst .o,.d,$@)
 
 ifeq ($(DEBUG),1)
-CFLAGS += -O0
+CFLAGS += -O0 -g
 else
 CFLAGS += -O2 -march=i686
 endif
@@ -41,6 +42,7 @@ define end-module-eval
 $(MODULE_NAME)_SRC    = $$(addprefix src/$(MODULE_NAME)/,$(MODULE_SRC))
 $(MODULE_NAME)_H      = $$(wildcard src/$(MODULE_NAME)/*.h)
 $(MODULE_NAME)_OBJ    = $$(call src2obj,$$($(MODULE_NAME)_SRC))
+$(MODULE_NAME)_DEP    = $$(patsubst %.o,%.d,$$(filter %.o,$$($(MODULE_NAME)_OBJ)))
 $(MODULE_NAME)_OUTDIR = $$(call out-dirs,$$($(MODULE_NAME)_OBJ))
 $(MODULE_NAME)_OUT2   = obj/$(MODULE_NAME)/$(MODULE_OUT)
 MODULES += $(MODULE_NAME)
@@ -52,6 +54,7 @@ $$($(MODULE_NAME)_OUT2): $$($(MODULE_NAME)_OBJ)
 MODULE_NAME :=
 MODULE_SRC :=
 MODULE_OUT :=
+-include $$($(MODULE_NAME)_DEP)
 endef
 
 # Called at the end of module.mk
@@ -64,9 +67,10 @@ MODULES_MK = $(shell ls src/*/module.mk)
 $(foreach m,$(MODULES_MK),$(eval include $(m)))
 
 # Common parts
-common_SRC    = $(addprefix src/, reader.cpp writer.cpp dprintf.cpp)
+common_SRC    = $(addprefix src/, reader.cpp writer.cpp threadpool.cpp looptask.cpp dprintf.cpp)
 common_H      = $(wildcard src/*.h)
 common_OBJ    = $(call src2obj,$(common_SRC))
+common_DEP    = $(patsubst %.o,%.d,$(filter %.o,$(common_OBJ)))
 common_LIB    = obj/libbpg-common.a
 common_OUTDIR = $(call out-dirs,$(common_OBJ))
 
@@ -76,6 +80,8 @@ MODULES_OUTDIR += $(common_OUTDIR)
 common: $(common_LIB)
 $(common_OBJ): | $(common_H) $(common_OUTDIR)
 $(common_LIB): $(common_OBJ)
+
+-include $(common_DEP)
 
 
 ### Targets ###
@@ -95,7 +101,7 @@ libbpg:
 obj/read_test.exe: $(CPPFLAGS)+=-I../src -I../$(bpg_PATH)
 
 obj/read_test.exe: test/read_test.cpp $(common_LIB) $(libbpg_LIB) $(libx265_LIB)
-	$(CXX) $(CPPFLAGS) $(CFLAGS) $(CXXFLAGS) $(LDFLAGS) $^ -o $@
+	$(CXX) $(CPPFLAGS) $(CFLAGS) $(CXXFLAGS) $^ $(LDFLAGS) -o $@
 
 $(MODULES_OUT): $(common_LIB) $(libbpg_LIB) $(libx265_LIB)
 
@@ -111,10 +117,10 @@ obj/%.a:
 	$(AR) rcs $@ $^
 
 obj/%.c.o: src/%.c
-	$(GCC) -c $(CPPFLAGS) $(CFLAGS) $< -o $@
+	$(GCC) -c $(CPPFLAGS) $(DEPFLAGS) $(CFLAGS) $< -o $@
 
 obj/%.cpp.o: src/%.cpp
-	$(CXX) -c $(CPPFLAGS) $(CFLAGS) $(CXXFLAGS) $< -o $@
+	$(CXX) -c $(CPPFLAGS) $(DEPFLAGS) $(CFLAGS) $(CXXFLAGS) $< -o $@
 
 obj/%.rc.o: src/%.rc
 	$(RC) $< $@
