@@ -139,6 +139,8 @@ void EncParam::ParseParam (const char s_opt[])
         Logi ("-b %d\n", BitDepth);
 
     /* Encoder */
+    param->encoder_type = HEVC_ENCODER_X265; // Always use x265
+#if 0
     {
         char buf[8];
         if (get_param (s_opt, "-e", "-e %7s", buf))
@@ -153,6 +155,7 @@ void EncParam::ParseParam (const char s_opt[])
             Logi ("-e %s\n", buf);
         }
     }
+#endif
 
     /* Compression level */
     if (get_param (s_opt, "-m", "-m %d", &param->compress_level))

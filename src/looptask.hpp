@@ -27,7 +27,7 @@ struct LoopTask
 /**
  * A loop-based task parallelization dispatcher
  */
-class LoopTaskSet
+class LoopTaskManager
 {
 private:
     class innerTask;
@@ -35,11 +35,11 @@ private:
     winthread::mutex mtx;
     winthread::cond_var cv;
 
-    ThreadPool *pool;
+    ThreadPool &pool;
     int begin;
     int end;
     int step;
-    int minIter;        ///< Minimum interations per task
+    int minIter;        ///< Minimum iterations per task
 
     volatile uint8_t waitCnt;
 
@@ -50,10 +50,18 @@ private:
     void dispatchTasks (LoopTask *ltasks[]);
 
 public:
-    LoopTaskSet (ThreadPool *pool, int begin, int end, int step = 1, int minIterPerTask = 1):
-        pool(pool), begin(begin), end(end), step(step), minIter(minIterPerTask),
+    LoopTaskManager (ThreadPool &pool):
+        pool(pool), begin(0), end(0), step(0), minIter(0),
         waitCnt(0) {}
 
+    void SetLoopRange (int begin, int end, int step = 1, int minIterPerTask = 1);
+
+    /**
+     * Create tasks, run and wait all task end
+     * @tparam TASK Class which implements #LoopTask::loop()
+     * @param args  Parameters to TASK initializer
+     * @return Ending index of loops
+     */
     template <class TASK, typename... Args>
     int Dispatch (Args&&... args) {
         uint8_t taskCnt = calcOptTaskCnt();

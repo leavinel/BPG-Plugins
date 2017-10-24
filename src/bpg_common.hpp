@@ -26,8 +26,15 @@ extern "C" {
 #include "bpgenc.h"
 }
 
-
 #include "threadpool.hpp"
+#include "sws_context.hpp"
+
+#undef EXT
+#ifdef BPG_COMMON_SET
+#define EXT
+#else
+#define EXT extern
+#endif
 
 
 #define MIN_LINES_PER_TASK      32
@@ -38,8 +45,7 @@ extern "C" {
         throw runtime_error (#expr " failed")
 
 
-extern ThreadPool *gThreadPool;
-
+EXT ThreadPool *gThreadPool;
 
 namespace bpg {
 
@@ -62,9 +68,27 @@ struct ImageInfo: public BPGImageInfo
 };
 
 
-/* Alias of shared pointers */
-typedef std::shared_ptr<BPGDecoderContext> pBPGDecoderContext;
-typedef std::shared_ptr<BPGDecodeBuffer> pBPGDecoderBuffer;
+/**
+ * Decoded frame w/ buffer
+ */
+class Frame
+{
+private:
+    bool bReady;
+    std::unique_ptr<uint8_t[]> buf;
+    uint32_t stride;
+
+public:
+    Frame(): bReady(false), stride(0) {}
+
+    bool isReady() const { return bReady; }
+    int GetStride() const { return stride; }
+    uint8_t *GetBuffer() { return buf.get(); }
+
+    void Alloc (const ImageInfo &info);
+    void GetLine (int y, void *dst);
+};
+
 
 
 /**
@@ -76,6 +100,24 @@ private:
     std::shared_ptr<BPGDecoderContext> ctx;
     ImageInfo info;
 
+    struct convertParam;
+    class convertTask;
+
+    int prepareConvert (
+        convertParam &param,
+        enum AVPixelFormat dst_fmt,
+        void *dst,
+        int dst_stride,
+        int quality
+    );
+
+    int doConvert (
+        sws::Context &swsCtx,
+        const convertParam &param,
+        int cvt_y,
+        int cvt_h
+    );
+
 public:
     enum {
         OPT_HEADER_ONLY = 1,
@@ -86,27 +128,24 @@ public:
     void DecodeFile (const char *s_file, uint8_t opts = 0);
     void DecodeBuffer (const void *buf, size_t len, uint8_t opts = 0);
 
-    const pBPGDecoderContext &GetContext() const { return ctx; }
     const ImageInfo& GetInfo() const { return info; }
 
-    void Start (BPGDecoderOutputFormat out_fmt, const int8_t *shuffle, bool hq_output = true);
-};
+    int Convert (
+        enum AVPixelFormat dst_fmt,
+        void *dst,
+        int dst_stride,
+        int quality = 9
+    );
 
+    int ConvertMT (
+        ThreadPool &pool,
+        enum AVPixelFormat dst_fmt,
+        void *dst,
+        int dst_stride,
+        int quality = 9
+    );
 
-/**
- * Wrapper of #BPGDecoderBuffer
- */
-class DecodeBuffer
-{
-private:
-    std::shared_ptr<BPGDecoderContext> ctx;
-    std::shared_ptr<BPGDecodeBuffer> buf;
-    uint16_t y;
-
-public:
-    DecodeBuffer (Decoder *dec, uint16_t y_start);
-
-    void GetLine (void *buf);
+    int ConvertToFrame (Frame &frame, ThreadPool &pool, int quality = 9);
 };
 
 

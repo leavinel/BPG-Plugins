@@ -15,17 +15,17 @@ using namespace winthread;
 /**
  * LoopTask inner task wrapper class
  */
-class LoopTaskSet::innerTask: public task
+class LoopTaskManager::innerTask: public task
 {
 private:
-    LoopTaskSet *set;
+    LoopTaskManager *set;
     LoopTask *ltask;
     int begin;
     int end;
     int step;
 
 public:
-    innerTask (LoopTaskSet *set, LoopTask *ltask, int begin, int end, int step):
+    innerTask (LoopTaskManager *set, LoopTask *ltask, int begin, int end, int step):
         set(set), ltask(ltask), begin(begin), end(end), step(step) {}
 
     virtual ~innerTask(){}
@@ -38,11 +38,19 @@ public:
 };
 
 
+void LoopTaskManager::SetLoopRange (int begin, int end, int step, int minIterPerTask)
+{
+    this->begin = begin;
+    this->end   = end;
+    this->step  = step;
+    this->minIter = minIterPerTask;
+}
+
 
 /**
  * For inner tasks to report that the task done
  */
-void LoopTaskSet::reportDone (innerTask *itask)
+void LoopTaskManager::reportDone (innerTask *itask)
 {
     lock_guard _l(mtx);
 
@@ -54,13 +62,12 @@ void LoopTaskSet::reportDone (innerTask *itask)
 /**
  * Calculate optimized task count for parallel execution
  */
-int LoopTaskSet::calcOptTaskCnt() const
+int LoopTaskManager::calcOptTaskCnt() const
 {
     uint8_t taskCnt = 1;
 
     /* Get basic task count by number of processor cores */
-    if (pool)
-        taskCnt = pool->GetNumOfProc();
+    taskCnt = pool.GetNumOfProc();
 
     if (taskCnt == 1) // Only 1 core available
         return 1;
@@ -82,7 +89,7 @@ int LoopTaskSet::calcOptTaskCnt() const
 /**
  * Calculate the ending index of the loop
  */
-int LoopTaskSet::calcEndingIdx() const
+int LoopTaskManager::calcEndingIdx() const
 {
     return begin + ((end - begin + step-1) / step) * step;
 }
@@ -91,9 +98,9 @@ int LoopTaskSet::calcEndingIdx() const
 /**
  * Wait all inner task is done
  */
-void LoopTaskSet::dispatchTasks (LoopTask *ltasks[])
+void LoopTaskManager::dispatchTasks (LoopTask *ltasks[])
 {
-    size_t procCnt = pool->GetNumOfProc();
+    size_t procCnt = pool.GetNumOfProc();
     innerTask *itasks[procCnt];
 
     int loopCnt = (end - begin) / step;
@@ -118,7 +125,7 @@ void LoopTaskSet::dispatchTasks (LoopTask *ltasks[])
         lock_guard _l(mtx);
 
         for (size_t i = 0; i < procCnt; i++)
-            pool->EnqueueTask (itasks[i]);
+            pool.EnqueueTask (itasks[i]);
 
         cv.wait (mtx);
     }

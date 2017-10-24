@@ -48,7 +48,7 @@ int main (void)
     ThreadPool pool;
     pool.Start();
 
-    LoopTaskSet set (&pool, -10, 10, 2);
+    LoopTaskManager set (&pool, -10, 10, 2);
     int last = set.Dispatch<Task> (2,3,4);
 
     printf ("last index: %d\n", last);

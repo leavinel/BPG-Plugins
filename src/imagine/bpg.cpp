@@ -5,20 +5,20 @@
  * @author Leav Wu (leavinel@gmail.com)
  */
 
+extern "C" {
 #include <stdio.h>
 #include <exception>
 #include <windows.h>
-#include "bpg_common.hpp"
-
-extern "C" {
 #include "ImagPlug.h"
 }
 
-#define VERSION_NUMBER1 0
-#define VERSION_NUMBER2 0
-#define VERSION_NUMBER3 0
-#define VERSION_NUMBER4 1
-#define VERSION_NUMBER (VERSION_NUMBER1<<24)|(VERSION_NUMBER2<<16)|(VERSION_NUMBER3<<8)|(VERSION_NUMBER4<<0)
+#include "log.h"
+
+#define BPG_COMMON_SET
+#include "bpg_common.hpp"
+
+#define _VERSION_NUMBER(a,b,c,d)     ((a<<24) | (b<<16) | (c<<8) | d)
+#define VERSION_NUMBER(abcd)      _VERSION_NUMBER (abcd)
 
 #define __UNICODE_TEXT(x) L##x
 #define UNICODE_TEXT(x) __UNICODE_TEXT(x)
@@ -52,7 +52,7 @@ static PALETTEENTRY *get_gray_palette()
 
 static BOOL IMAGINEAPI checkFile (IMAGINEPLUGINFILEINFOTABLE *fileInfoTable,IMAGINELOADPARAM *loadParam,int flags)
 {
-    return BpgImageInfo2::CheckHeader (loadParam->buffer, loadParam->length);
+    return bpg::ImageInfo::CheckHeader (loadParam->buffer, loadParam->length);
 }
 
 
@@ -63,29 +63,18 @@ static LPIMAGINEBITMAP IMAGINEAPI loadFile(IMAGINEPLUGINFILEINFOTABLE *fileInfoT
         return NULL;
 
     try {
+        enum AVPixelFormat dst_fmt;
+        uint8_t *dst;
+        int dst_stride;
+        bpg::Decoder dec;
+
         if (flags & IMAGINELOADPARAM_GETINFO)
-        {
-            BpgImageInfo2 info;
-            info.LoadFromBuffer (loadParam->buffer, loadParam->length);
-            uint8_t bpp = info.GetBpp();
-            Logi ("%s [%ux%u] @ %u bpp flags%X\n", __FUNCTION__, info.width, info.height, bpp, flags);
-            LPIMAGINEBITMAP bitmap = iface->lpVtbl->Create (info.width, info.height, bpp, flags);
-            if (!bitmap)
-            {
-                loadParam->errorCode = IMAGINEERROR_OUTOFMEMORY;
-                return NULL;
-            }
+            dec.DecodeBuffer (loadParam->buffer, loadParam->length, bpg::Decoder::OPT_HEADER_ONLY);
+        else
+            dec.DecodeBuffer (loadParam->buffer, loadParam->length);
 
-            return bitmap;
-        }
-
-        BpgReader reader;
-        reader.LoadFromBuffer (loadParam->buffer, loadParam->length);
-
-        BpgDecoder &decoder = reader.GetDecoder();
-        const BpgImageInfo2 &info = decoder.GetInfo();
-        int bpp = info.GetBpp();
-        Logi ("%s [%ux%u] @ %u bpp flags%X\n", __FUNCTION__, info.width, info.height, bpp, flags);
+        const bpg::ImageInfo &info = dec.GetInfo();
+        uint8_t bpp = info.GetBpp();
         LPIMAGINEBITMAP bitmap = iface->lpVtbl->Create (info.width, info.height, bpp, flags);
         if (!bitmap)
         {
@@ -93,51 +82,32 @@ static LPIMAGINEBITMAP IMAGINEAPI loadFile(IMAGINEPLUGINFILEINFOTABLE *fileInfoT
             return NULL;
         }
 
-        /* If grayscale, set palette */
-        if (bpp == 8)
-            iface->lpVtbl->SetPalette (bitmap, get_gray_palette());
+        if (flags & IMAGINELOADPARAM_GETINFO)
+            return bitmap;
 
-        BPGDecoderOutputFormat fmt;
-        const int8_t *shuffle;
-        static const int8_t bpp24_shuffle[] = {2, 1, 0};
-        static const int8_t bpp32_shuffle[] = {2, 1, 0, 3};
+        /* If grayscale, set palette */
         switch (bpp)
         {
+        case 8:
+            iface->lpVtbl->SetPalette (bitmap, get_gray_palette());
+            dst_fmt = AV_PIX_FMT_GRAY8;
+            break;
         case 24:
-            fmt = BPG_OUTPUT_FORMAT_RGB24;
-            shuffle = bpp24_shuffle;
+            dst_fmt = AV_PIX_FMT_BGR24;
             break;
         case 32:
-            fmt = BPG_OUTPUT_FORMAT_RGBA32;
-            shuffle = bpp32_shuffle;
+            dst_fmt = AV_PIX_FMT_BGRA;
             break;
-        case 8:
         default:
-            fmt = BPG_OUTPUT_FORMAT_GRAY8;
-            shuffle = NULL;
-            break;
+            throw runtime_error ("invalid bpp");
         }
 
-        decoder.Start (fmt, shuffle);
-
-        IMAGINECALLBACKPARAM cb;
-        cb.dib = bitmap;
-        cb.param = loadParam->callback.param;
-        cb.overall = info.height - 1;
-
-        for (uint32_t y = 0; y < info.height; y++)
-        {
-            uint8_t *dst = (uint8_t*)iface->lpVtbl->GetLineBits (bitmap, y);
-            decoder.GetLine (y, dst);
-
-            cb.current = y;
-            if ( (flags&IMAGINELOADPARAM_CALLBACK) && (!loadParam->callback.proc(&cb)))
-            {
-                loadParam->errorCode = IMAGINEERROR_ABORTED;
-                break;
-            }
-        }
-
+        /* Bitmap is upside-down */
+        size_t linesz = iface->lpVtbl->GetWidthBytes (bitmap);
+        dst = (uint8_t*) iface->lpVtbl->GetBits (bitmap);
+        dst += linesz * (info.height - 1);
+        dst_stride = -linesz;
+        dec.ConvertMT (*gThreadPool, dst_fmt, dst, dst_stride, true);
         return bitmap;
     }
     catch (const exception &e) {
@@ -162,7 +132,7 @@ static BOOL IMAGINEAPI registerProcA(const IMAGINEPLUGININTERFACE *iface)
         loadFile,
         saveFile,
         FORMAT_NAME,
-        FORMAT_EXT,
+        FORMAT_EXT "\0",
     };
     return (BOOL)iface->lpVtbl->RegisterFileType(&fileInfoItemA);
 }
@@ -176,7 +146,7 @@ static BOOL IMAGINEAPI registerProcW(const IMAGINEPLUGININTERFACE *iface)
         loadFile,
         saveFile,
         (LPCTSTR) UNICODE_TEXT(FORMAT_NAME),
-        (LPCTSTR) UNICODE_TEXT(FORMAT_EXT),
+        (LPCTSTR) UNICODE_TEXT(FORMAT_EXT "\0"),
     };
     return (BOOL)iface->lpVtbl->RegisterFileType(&fileInfoItemW);
 }
@@ -188,11 +158,11 @@ EXTC BOOL CALLBACK APIENTRY DllMain(HINSTANCE hInstance,DWORD dwReason,LPVOID lp
     {
     case DLL_PROCESS_ATTACH :
         Logi ("Compiled at %s %s\n", __TIME__, __DATE__);
-        BpgReader::InitClass();
+        gThreadPool = new ThreadPool;
         break;
 
     case DLL_PROCESS_DETACH :
-        BpgReader::DeinitClass();
+        delete gThreadPool;
         break;
 
     case DLL_THREAD_ATTACH  :
@@ -210,7 +180,7 @@ EXTC BOOL IMAGINEAPI ImaginePluginGetInfoA(IMAGINEPLUGININFOA *dest)
     {
         sizeof(pluginInfoA),
         registerProcA,
-        VERSION_NUMBER,
+        VERSION_NUMBER (MODULE_VER),
         MODULE_NAME,
         IMAGINEPLUGININTERFACE_VERSION,
     };
@@ -225,7 +195,7 @@ EXTC BOOL IMAGINEAPI ImaginePluginGetInfoW(IMAGINEPLUGININFOW *dest)
     {
         sizeof(pluginInfoW),
         registerProcW,
-        VERSION_NUMBER,
+        VERSION_NUMBER (MODULE_VER),
         UNICODE_TEXT (MODULE_NAME),
         IMAGINEPLUGININTERFACE_VERSION,
     };

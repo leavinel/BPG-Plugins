@@ -14,9 +14,10 @@ extern "C" {
 #include "spi00in.h"
 }
 
+#include "log.h"
+
+#define BPG_COMMON_SET
 #include "bpg_common.hpp"
-#include "benchmark.hpp"
-#include "looptask.hpp"
 
 
 #define NELEM(ary)      ((size_t)(sizeof(ary)/sizeof(ary[0])))
@@ -112,8 +113,6 @@ static int read_image (LPSTR buf, long len, unsigned int flag,
 
     try {
         {
-            Benchmark bm ("BPG decode");
-
             if ((flag & 7) == 0) {
             /* buf is the filename */
                 dec.DecodeFile (buf);
@@ -158,7 +157,11 @@ static int read_image (LPSTR buf, long len, unsigned int flag,
         if (!buf)
             goto fail_lock_img;
 
-        {
+        do {
+            uint8_t *dst;
+            int dst_stride;
+            enum AVPixelFormat dst_fmt;
+
             BITMAPINFOHEADER &hdr = pbmpinfo->bmiHeader;
             hdr.biSize          = sizeof(BITMAPINFOHEADER);
             hdr.biWidth         = info.width;
@@ -169,6 +172,7 @@ static int read_image (LPSTR buf, long len, unsigned int flag,
 
             if (8 == bpp)
             {
+                /* Grayscale */
                 for (int i = 0; i < 256; i++)
                 {
                     RGBQUAD &rgb = pbmpinfo->bmiColors[i];
@@ -176,61 +180,20 @@ static int read_image (LPSTR buf, long len, unsigned int flag,
                     rgb.rgbGreen = i;
                     rgb.rgbBlue  = i;
                 }
+                dst_fmt = AV_PIX_FMT_GRAY8;
+            }
+            else
+            {
+                /* Convert YUV -> RGB */
+                dst_fmt = AV_PIX_FMT_BGR24;
             }
 
-            BPGDecoderOutputFormat fmt;
-            const int8_t *shuffle;
-            static const int8_t bpp24_shuffle[] = {2, 1, 0};
-            static const int8_t bpp32_shuffle[] = {2, 1, 0, 3};
-            switch (bpp)
-            {
-            case 24:
-                fmt = BPG_OUTPUT_FORMAT_RGB24;
-                shuffle = bpp24_shuffle;
-                break;
-            case 32:
-                fmt = BPG_OUTPUT_FORMAT_RGBA32;
-                shuffle = bpp32_shuffle;
-                break;
-            case 8:
-            default:
-                fmt = BPG_OUTPUT_FORMAT_GRAY8;
-                shuffle = NULL;
-                break;
-            }
+            dst = (uint8_t*)buf + (linesz * (info.height-1));
+            dst_stride = -linesz;
 
-            Benchmark bm ("BPG post-process");
-            dec.Start (fmt, shuffle, hq_output);
-
-            class task: public LoopTask
-            {
-            private:
-                Decoder &dec;
-                uint8_t *buf;
-                size_t linesz;
-                uint16_t h;
-
-            public:
-                task (Decoder &dec, uint8_t *buf, size_t linesz, size_t h):
-                    dec(dec), buf(buf), linesz(linesz), h(h) {}
-
-                virtual void loop (int begin, int end, int step) override {
-                    DecodeBuffer dbuf (&dec, begin);
-
-                    /* Framebuffer is upside-down */
-                    uint8_t *bufline = (uint8_t*)buf + linesz * (h - begin);
-
-                    for (int y = begin; y < end; y++)
-                    {
-                        bufline -= linesz;
-                        dbuf.GetLine (bufline);
-                    }
-                }
-            };
-
-            LoopTaskSet set (gThreadPool, 0, info.height, 1, MIN_LINES_PER_TASK);
-            set.Dispatch<task> (dec, (uint8_t*)buf, linesz, info.height);
+            dec.ConvertMT (*gThreadPool, dst_fmt, dst, dst_stride, 1);
         }
+        while (0);
 
         if (lpPrgressCallback)
             lpPrgressCallback (1, 1, lData);

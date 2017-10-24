@@ -4,12 +4,15 @@
  * When Xuser is built, put it in PluginsEx folder
  */
 
+extern "C" {
 #include <stdio.h>
 #include <windows.h>
+}
 
+#include "log.h"
+
+#define BPG_COMMON_SET
 #include "bpg_common.hpp"
-#include "looptask.hpp"
-#include "benchmark.hpp"
 
 
 #define ENC_CONFIG_FILE     "Plugins\\Xbpg.ini"
@@ -75,120 +78,22 @@ EXTC BOOL API gfpGetPluginInfo (
 
 class BpgReader
 {
-private:
-    bpg::Decoder dec;
-
-    bool bDecReady;
-    uint8_t *buf;
-
-    void fullDecode();
-
 public:
-    uint8_t bpp;
-
-    BpgReader(): bDecReady(false), buf(NULL), bpp(0) {}
-
-    ~BpgReader() {
-        if (buf)
-            delete[] buf;
-    }
-
-    const bpg::ImageInfo& GetInfo() {
-        return dec.GetInfo();
-    }
-
-    void DecodeFile (const char *s_file) {
-        Benchmark bm("decode");
-        dec.DecodeFile (s_file);
-        bpp = GetInfo().GetBpp();
-    }
-
-    void PrepareDecode() {
-        if (!bDecReady)
-        {
-            fullDecode();
-            bDecReady = true;
-        }
-    }
-
-    void CopyLine (int y, void *dst) {
-        uint8_t *src = buf;
-        size_t stride = GetInfo().width * bpp / 8;
-
-        memcpy (dst, src + y * stride, stride);
-    }
+    bpg::Decoder dec;
+    bpg::Frame frame;
 };
 
-
-void BpgReader::fullDecode()
-{
-    Benchmark bm("full decode");
-    /* Prepare decode */
-    BPGDecoderOutputFormat fmt;
-    const int8_t *shuffle;
-    static const int8_t bpp24_shuffle[] = {0, 1, 2};
-    static const int8_t bpp32_shuffle[] = {0, 1, 2, 3};
-    switch (bpp)
-    {
-    case 24:
-        fmt = BPG_OUTPUT_FORMAT_RGB24;
-        shuffle = bpp24_shuffle;
-        break;
-    case 32:
-        fmt = BPG_OUTPUT_FORMAT_RGBA32;
-        shuffle = bpp32_shuffle;
-        break;
-    case 8:
-    default:
-        fmt = BPG_OUTPUT_FORMAT_GRAY8;
-        shuffle = NULL;
-        break;
-    }
-
-    dec.Start (fmt, shuffle, true);
-
-    /* Allocate frame buffer */
-    const bpg::ImageInfo &info2 = GetInfo();
-    buf = new uint8_t [info2.width * info2.height * bpp / 8];
-
-    class task: public LoopTask
-    {
-    private:
-        bpg::Decoder *dec;
-        uint8_t *buf;
-        size_t stride;
-
-    public:
-        task (bpg::Decoder *dec, uint8_t *buf, size_t stride):
-            dec(dec), buf(buf), stride(stride) {}
-
-        virtual void loop (int begin, int end, int step) override {
-            bpg::DecodeBuffer dbuf (dec, begin);
-            uint8_t *dst = buf + begin * stride;
-
-            for (int i = begin; i < end; i++)
-            {
-                dbuf.GetLine (dst);
-                dst += stride;
-            }
-        }
-    };
-
-    /* Decode */
-    LoopTaskSet set (gThreadPool, 0, info2.height, 1, MIN_LINES_PER_TASK);
-    set.Dispatch<task> (&dec, buf, info2.width * bpp / 8);
-}
 
 
 EXTC void *API gfpLoadPictureInit (LPCSTR filename)
 {
     Logi("%s: %s", __FUNCTION__, filename);
     try {
-        gThreadPool->Start();
+        BpgReader *r = new BpgReader;
+        bpg::Decoder &dec = r->dec;
 
-        BpgReader *dec = new BpgReader;
-        dec->DecodeFile (filename);
-        return dec;
+        dec.DecodeFile (filename);
+        return r;
     }
     catch (const exception &e) {
         Loge (e.what());
@@ -212,15 +117,17 @@ EXTC BOOL API gfpLoadPictureGetInfo (
 )
 {
     Logi("%s", __FUNCTION__);
-    BpgReader &dec = *(BpgReader*)ptr;
+    BpgReader *r = (BpgReader*)ptr;
+    bpg::Decoder &dec = r->dec;
     const bpg::ImageInfo &info = dec.GetInfo();
+    uint8_t bpp = info.GetBpp();
 
     *pictype = GFP_RGB;
     *width = info.width;
     *height = info.height;
     *dpi = 68;
-    *bits_per_pixel = dec.bpp;
-    *bytes_per_line = info.width * dec.bpp / 8;
+    *bits_per_pixel = bpp;
+    *bytes_per_line = info.width * bpp / 8;
     *has_colormap = FALSE;
 
     info.GetFormatDetail (label, label_max_size);
@@ -232,11 +139,16 @@ EXTC BOOL API gfpLoadPictureGetLine (void *ptr, INT line, unsigned char *buffer)
 {
     if (line==0)
         Logi("%s", __FUNCTION__);
-    BpgReader &dec = *(BpgReader*)ptr;
+
+    BpgReader *r = (BpgReader*)ptr;
+    bpg::Decoder &dec = r->dec;
+    bpg::Frame &frame = r->frame;
 
     try {
-        dec.PrepareDecode();
-        dec.CopyLine (line, buffer);
+        if (!frame.isReady())
+            dec.ConvertToFrame (frame, *gThreadPool);
+
+        frame.GetLine (line, buffer);
     }
     catch (const exception &e) {
         Loge (e.what());
@@ -264,16 +176,16 @@ EXTC void API gfpLoadPictureExit( void * ptr )
 class BpgWriter
 {
 private:
-    std::shared_ptr<FILE> fp;
+    shared_ptr<FILE> fp;
 
     int w, h;
     int bitsPerPixel;
     bpg::EncInputFormat inFmt;
 
     bpg::EncParam param;
-    std::unique_ptr<bpg::Palette> pal;
-    std::unique_ptr<bpg::EncImageBuffer> buf;
-    std::unique_ptr<bpg::EncImage> img;
+    unique_ptr<bpg::Palette> pal;
+    unique_ptr<bpg::EncImageBuffer> buf;
+    unique_ptr<bpg::EncImage> img;
 
 public:
     BpgWriter (const char s_file[], int w, int h, int bits_per_pixel):
