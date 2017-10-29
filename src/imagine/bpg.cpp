@@ -13,6 +13,7 @@ extern "C" {
 }
 
 #include "log.h"
+#include "av_util.hpp"
 
 #define BPG_COMMON_SET
 #include "bpg_common.hpp"
@@ -107,7 +108,7 @@ static LPIMAGINEBITMAP IMAGINEAPI loadFile(IMAGINEPLUGINFILEINFOTABLE *fileInfoT
         dst = (uint8_t*) iface->lpVtbl->GetBits (bitmap);
         dst += linesz * (info.height - 1);
         dst_stride = -linesz;
-        dec.ConvertMT (*gThreadPool, dst_fmt, dst, dst_stride, true);
+        dec.Convert (dst_fmt, dst, dst_stride, true);
         return bitmap;
     }
     catch (const exception &e) {
@@ -158,11 +159,13 @@ EXTC BOOL CALLBACK APIENTRY DllMain(HINSTANCE hInstance,DWORD dwReason,LPVOID lp
     {
     case DLL_PROCESS_ATTACH :
         Logi ("Compiled at %s %s\n", __TIME__, __DATE__);
-        gThreadPool = new ThreadPool;
+        bpg::gThreadPool = new ThreadPool;
+        avutil::init();
         break;
 
     case DLL_PROCESS_DETACH :
-        delete gThreadPool;
+        avutil::deinit();
+        delete bpg::gThreadPool;
         break;
 
     case DLL_THREAD_ATTACH  :

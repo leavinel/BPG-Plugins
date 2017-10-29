@@ -28,6 +28,7 @@ extern "C" {
 
 #include "threadpool.hpp"
 #include "sws_context.hpp"
+#include "frame.hpp"
 
 #undef EXT
 #ifdef BPG_COMMON_SET
@@ -45,9 +46,12 @@ extern "C" {
         throw runtime_error (#expr " failed")
 
 
+namespace bpg {
+
 EXT ThreadPool *gThreadPool;
 
-namespace bpg {
+typedef std::unique_ptr<FILE, int(*)(FILE*)> pFILE;
+
 
 /**
  * Wrapper of #BPGImageInfo
@@ -60,6 +64,7 @@ struct ImageInfo: public BPGImageInfo
     uint8_t GetBpp() const;
     void GetFormatDetail (char buf[], size_t sz) const;
     void GetFormatDetail (std::string &s) const;
+    enum AVPixelFormat GetAVPixFmt() const;
 
     enum {
         HEADER_MAGIC_SIZE = 4,
@@ -68,27 +73,8 @@ struct ImageInfo: public BPGImageInfo
 };
 
 
-/**
- * Decoded frame w/ buffer
- */
-class Frame
-{
-private:
-    bool bReady;
-    std::unique_ptr<uint8_t[]> buf;
-    uint32_t stride;
 
-public:
-    Frame(): bReady(false), stride(0) {}
-
-    bool isReady() const { return bReady; }
-    int GetStride() const { return stride; }
-    uint8_t *GetBuffer() { return buf.get(); }
-
-    void Alloc (const ImageInfo &info);
-    void GetLine (int y, void *dst);
-};
-
+typedef std::unique_ptr<BPGDecoderContext, void(*)(BPGDecoderContext*)> pBPGDecoderContext;
 
 
 /**
@@ -97,26 +83,8 @@ public:
 class Decoder
 {
 private:
-    std::shared_ptr<BPGDecoderContext> ctx;
+    pBPGDecoderContext ctx;
     ImageInfo info;
-
-    struct convertParam;
-    class convertTask;
-
-    int prepareConvert (
-        convertParam &param,
-        enum AVPixelFormat dst_fmt,
-        void *dst,
-        int dst_stride,
-        int quality
-    );
-
-    int doConvert (
-        sws::Context &swsCtx,
-        const convertParam &param,
-        int cvt_y,
-        int cvt_h
-    );
 
 public:
     enum {
@@ -137,15 +105,7 @@ public:
         int quality = 9
     );
 
-    int ConvertMT (
-        ThreadPool &pool,
-        enum AVPixelFormat dst_fmt,
-        void *dst,
-        int dst_stride,
-        int quality = 9
-    );
-
-    int ConvertToFrame (Frame &frame, ThreadPool &pool, int quality = 9);
+    int ConvertToFrame (Frame &frame, int quality = 9);
 };
 
 
@@ -181,16 +141,7 @@ public:
 };
 
 
-/**
- * Input format
- */
-enum EncInputFormat {
-    INPUT_GRAY8 = 0,
-    INPUT_RGB8,
-    INPUT_RGB24,
-    INPUT_RGBA32,
-};
-
+typedef std::unique_ptr<BPGEncoderParameters, void(*)(BPGEncoderParameters*)> pBPGEncoderParameters;
 
 /**
  * Wrapper of #BPGEncoderParameters
@@ -198,71 +149,41 @@ enum EncInputFormat {
 class EncParam
 {
 private:
-    std::shared_ptr<BPGEncoderParameters> param;
+    pBPGEncoderParameters param;
 
 public:
-    BPGColorSpaceEnum cs;
-
-    int BitDepth;   ///< Bit-depth of encoded BPG
-                    ///< It should be added into #BPGEncoderParameters, but i didn't
+    static const BPGColorSpaceEnum cs = BPG_CS_YCbCr;
+    static const uint8_t BitDepth = 8;
 
     EncParam();
+    BPGEncoderParameters *operator->() const { return param.get(); }
 
-    void ParseParam (const char s_buf[]);
-    void LoadConfig (const char s_file[], uint8_t bits_per_pixel);
+    void Parse (const char s_opt[]);
 
-    BPGEncoderParameters* operator->() {
-        return param.get();
-    }
-
-    operator BPGEncoderParameters*() const {
-        return param.get();
-    }
+    BPGEncoderParameters* get() { return param.get(); }
+    const BPGEncoderParameters* get() const { return param.get(); }
 };
 
 
 /**
- * Wrapper of #Image structure
- * The image buffer for BPG encoding
+ * INI file reader
  */
-class EncImage
+class IniFile
 {
 private:
-    std::shared_ptr<Image> img;
+    pFILE fp;
+    static void getPath (std::string &s);
 
 public:
-    EncImage (int w, int h, BPGImageFormatEnum fmt, bool has_alpha, BPGColorSpaceEnum cs, int bit_depth);
+    IniFile();
 
-    operator Image*() const {
-        return img.get();
-    }
-
-    void Convert (const void *dat);
+    void Open (const char *s_file);
+    operator bool() const { return !!fp; }
+    void GetLineByPrefix (std::string &s, const char s_prefix[]);
 };
 
 
-/**
- * Image buffer for encoding
- */
-class EncImageBuffer
-{
-private:
-    int w, h;
-    EncInputFormat inFmt;
-    BPGImageFormatEnum outFmt;
-    bool hasAlpha;
-    std::unique_ptr<uint8_t[]> buf;
-    size_t bufStride;      ///< Stride of buffer
-
-public:
-    EncImageBuffer (int w, int h, EncInputFormat in_fmt);
-
-    void PutLine (int line, const void *rgb, Palette *pal = NULL);
-    EncImage *CreateImage (BPGColorSpaceEnum out_cs, int bit_depth);
-};
-
-
-
+typedef std::unique_ptr<BPGEncoderContext, void(*)(BPGEncoderContext*)> pBPGEncoderContext;
 
 /**
  * Wrapper of #BPGEncoderContext
@@ -270,12 +191,11 @@ public:
 class Encoder
 {
 private:
-    std::shared_ptr<BPGEncoderContext> ctx;
-    static int WriteFunc (void *opaque, const uint8_t *buf, int buf_len);
+    static int writeFunc (void *opaque, const uint8_t *buf, int buf_len);
 
 public:
-    Encoder (const EncParam &param);
-    void Encode (FILE *fp, const EncImage &img);
+    Encoder(){}
+    void Encode (FILE *fp, const EncParam &param, const FrameDesc &frame);
 };
 
 

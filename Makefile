@@ -5,8 +5,8 @@ DEBUG = 0
 
 ### External reference ###
 LIBX265_PATH = libx265_2.5
-BPG_PATH     = libbpg-0.9.5
-FFMPEG_PATH  = ffmpeg-3.3.3-win32-dev
+BPG_PATH     = libbpg
+FFMPEG_PATH  = ffmpeg-3.4-win32-dev
 
 ### Toolchains ###
 AR  = ar
@@ -81,7 +81,7 @@ obj/imagine/bpg.plg: \
 
 .PHONY: common
 common: obj/libbpg_common.a
-libbpg_common_SRCS = reader.cpp writer.cpp threadpool.cpp looptask.cpp dprintf.cpp sws_context.cpp
+libbpg_common_SRCS = reader.cpp writer.cpp frame.cpp threadpool.cpp looptask.cpp dprintf.cpp sws_context.cpp av_util.cpp
 
 
 include $(wildcard obj/*.d)
@@ -102,11 +102,12 @@ $(BPG_PATH)/libbpg.a:
 
 .PHONY: libbpg-clean
 libbpg-clean:
-	cd $(BPG_PATH); make clean
+	cd $(BPG_PATH); make clean LIBX265_PATH=../$(LIBX265_PATH)
 
 # Output directory
 obj $(dir $(MODULES)):
-	mkdir -p $@
+	@echo '[MKDIR] $@'
+	@mkdir -p $@
 
 
 src2obj = $(patsubst %,obj/%.o,$(1))
@@ -127,7 +128,7 @@ obj/%.a: $$(call src2obj,$$(%_SRCS)) | $$(@D)
 	$(V)$(AR) rcs $@ $^
 
 # Link modules (DLL)
-$(MODULES): obj/libbpg_common.a $(BPG_PATH)/libbpg.a libavutil.dll.a libswscale.dll.a libx265.a
+$(MODULES): obj/libbpg_common.a $(BPG_PATH)/libbpg.a libswscale.dll.a libx265.a
 $(MODULES): | $$(@D)
 	@echo '[LD] $@'
 	$(V)$(CXX) -shared $(CPPFLAGS) $(CFLAGS) $(filter-out %.a,$^) $(filter %.a,$^) $(LDFLAGS) -o $@

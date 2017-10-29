@@ -12,70 +12,15 @@
 #include <windows.h>
 #include <psapi.h>
 
+extern "C" {
+#include "libswscale/swscale.h"
+}
+
 #include "bpg_common.hpp"
 #include "log.h"
 
 using namespace std;
 using namespace bpg;
-
-
-/**
- * Ini file smart pointer
- */
-class IniFile
-{
-private:
-    FILE *fp;
-
-    string getPath() {
-        char s_dll_dir[256];
-        GetModuleFileNameA (NULL, s_dll_dir, sizeof(s_dll_dir));
-        char *s_slash = strrchr (s_dll_dir, '\\');
-        s_slash[1] = '\0';
-
-        return s_dll_dir;
-    }
-
-public:
-    IniFile (const char *s_file): fp(NULL) {
-        string s_ini = getPath() + s_file;
-        Logi ("Open INI file '%s'...\n", s_ini.c_str());
-        fp = fopen (s_ini.c_str(), "rb");
-    }
-
-    ~IniFile() {
-        if (fp)
-        {
-            fclose (fp);
-            fp = NULL;
-        }
-    }
-
-    /** Test if file is opened */
-    operator bool() const {
-        return fp != NULL;
-    }
-
-    /** Get the line with specified prefix */
-    void getLine (string &s, const char s_prefix[]) {
-        s.clear();
-
-        if (!fp)
-            return;
-
-        char buf[256];
-        rewind (fp);
-
-        while (fgets (buf, sizeof(buf), fp))
-        {
-            if (0 == memcmp (buf, s_prefix, strlen(s_prefix))) // Found
-            {
-                s = buf;
-                break;
-            }
-        }
-    }
-};
 
 
 static int get_param (const char buf[], const char s_opt[], const char s_fmt[], ...)
@@ -95,16 +40,73 @@ static int get_param (const char buf[], const char s_opt[], const char s_fmt[], 
 }
 
 
+IniFile::IniFile(): fp(nullptr, fclose)
+{
+}
+
+
+/** Get path of this DLL */
+void IniFile::getPath (string &s)
+{
+    char s_dll_dir[256];
+
+    GetModuleFileNameA (NULL, s_dll_dir, sizeof(s_dll_dir));
+    char *s_slash = strrchr (s_dll_dir, '\\');
+    s_slash[1] = '\0';
+
+    s = s_dll_dir;
+}
+
+
+/** Open an INI file */
+void IniFile::Open (const char *s_file)
+{
+    string s_ini;
+
+    getPath (s_ini);
+    s_ini += s_file;
+
+    Logi ("Open INI file '%s'...\n", s_ini.c_str());
+
+    fp = pFILE (
+        fopen (s_ini.c_str(), "rb"),
+        fclose
+    );
+}
+
+
+/** Get the line by specified prefix */
+void IniFile::GetLineByPrefix (string &s, const char s_prefix[])
+{
+    s.clear();
+    if (!fp)
+        return;
+
+    FILE *f = fp.get();
+    char buf[256];
+
+    rewind (f);
+
+    while (fgets (buf, sizeof(buf), f))
+    {
+        if (0 == memcmp (buf, s_prefix, strlen(s_prefix))) // Found
+        {
+            s = buf;
+            break;
+        }
+    }
+}
+
+
 EncParam::EncParam():
-    param(bpg_encoder_param_alloc(), bpg_encoder_param_free),
-    cs(BPG_CS_YCbCr), BitDepth(8)
+    param (bpg_encoder_param_alloc(), bpg_encoder_param_free)
 {
 }
 
 /**
  * Parse encoding parameters with option string
  */
-void EncParam::ParseParam (const char s_opt[])
+void EncParam::Parse (const char s_opt[])
 {
     /* QP */
     if (get_param (s_opt, "-q", "-q %d", &param->qp))
@@ -134,28 +136,8 @@ void EncParam::ParseParam (const char s_opt[])
         }
     }
 
-    /* Bit depth */
-    if (get_param (s_opt, "-b", "-b %d", &BitDepth))
-        Logi ("-b %d\n", BitDepth);
-
     /* Encoder */
     param->encoder_type = HEVC_ENCODER_X265; // Always use x265
-#if 0
-    {
-        char buf[8];
-        if (get_param (s_opt, "-e", "-e %7s", buf))
-        {
-            if (strcmp ("jctvc", buf) == 0)
-                param->encoder_type = HEVC_ENCODER_JCTVC;
-            else if (strcmp ("x265", buf) == 0)
-                param->encoder_type = HEVC_ENCODER_X265;
-            else
-                throw runtime_error ("invalid encoder type");
-
-            Logi ("-e %s\n", buf);
-        }
-    }
-#endif
 
     /* Compression level */
     if (get_param (s_opt, "-m", "-m %d", &param->compress_level))
@@ -170,38 +152,118 @@ void EncParam::ParseParam (const char s_opt[])
 }
 
 
+typedef std::unique_ptr<Image, void(*)(Image*)> pImage;
+
 /**
- * Load parameters from a configuration file
- * @param s_file
+ * Wrapper of #Image structure
+ * The image buffer (YUV) for BPG encoding
  */
-void EncParam::LoadConfig (const char s_file[], uint8_t bits_per_pixel)
+class encImage
 {
-    IniFile f_ini (s_file);
+private:
+    pImage img;
+    enum AVPixelFormat dst_fmt;
 
-    if (!f_ini)
-    {
-        Logi ("%s", "Cannot open INI file\n");
-    }
-    else
-    {
-        char s_prefix[8];
-        snprintf (s_prefix, sizeof(s_prefix), "%u:", bits_per_pixel);
+public:
+    encImage(): img(nullptr, image_free), dst_fmt(AV_PIX_FMT_NONE) {}
 
-        string s_param;
-        f_ini.getLine (s_param, s_prefix);
-        ParseParam (s_param.c_str());
+    operator bool() const { return !!img; }
+    Image* get() { return img.get(); }
+
+    void Alloc (const EncParam &param, const FrameDesc &frame);
+    void Convert (const EncParam &param, const FrameDesc &frame);
+};
+
+
+
+void encImage::Alloc (const EncParam &param, const FrameDesc &frame)
+{
+    BPGImageFormatEnum fmt2;
+    int has_alpha;
+
+    switch (frame.fmt)
+    {
+        case AV_PIX_FMT_GRAY8:
+            fmt2 = BPG_FORMAT_GRAY;
+            dst_fmt = AV_PIX_FMT_GRAY16BE;
+            has_alpha = 0;
+            break;
+        case AV_PIX_FMT_RGB24:
+        case AV_PIX_FMT_BGR24:
+            fmt2 = param->preferred_chroma_format;
+            switch (fmt2)
+            {
+                case BPG_FORMAT_420: dst_fmt = AV_PIX_FMT_YUV420P16BE; break;
+                case BPG_FORMAT_422: dst_fmt = AV_PIX_FMT_YUV422P16BE; break;
+                case BPG_FORMAT_444: dst_fmt = AV_PIX_FMT_YUV444P16BE; break;
+                default: throw runtime_error ("invalid chroma format");
+            }
+            has_alpha = 0;
+            break;
+        case AV_PIX_FMT_RGBA:
+        case AV_PIX_FMT_BGRA:
+            fmt2 = param->preferred_chroma_format;
+            switch (fmt2)
+            {
+                case BPG_FORMAT_420: dst_fmt = AV_PIX_FMT_YUVA420P16BE; break;
+                case BPG_FORMAT_422: dst_fmt = AV_PIX_FMT_YUVA422P16BE; break;
+                case BPG_FORMAT_444: dst_fmt = AV_PIX_FMT_YUVA444P16BE; break;
+                default: throw runtime_error ("invalid chroma format");
+            }
+            has_alpha = 1;
+            break;
+        default:
+            throw runtime_error ("invalid frame format");
     }
+
+    switch (frame.fmt)
+    {
+        case AV_PIX_FMT_RGBA:
+        case AV_PIX_FMT_BGRA:
+            has_alpha = 1;
+            break;
+        default:
+            has_alpha = 0;
+            break;
+    }
+
+    img = pImage (
+        image_alloc (frame.w, frame.h, fmt2, has_alpha, param.cs, param.BitDepth),
+        image_free
+    );
+
+    img->limited_range = 0;
 }
 
 
-
-Encoder::Encoder (const EncParam &param):
-    ctx (bpg_encoder_open (param), bpg_encoder_close)
+/**
+ * Convert BPG encoding image (YUV) from Frame
+ */
+void encImage::Convert (const EncParam &param, const FrameDesc &frame)
 {
+    sws::Context swsCtx;
+    const uint8_t *src;
+    int src_stride;
+    uint8_t *dst[4];
+    int dst_stride[4];
+
+    Logi ("Converting color format...\n");
+    src = (const uint8_t*)frame.ptr;
+    src_stride = frame.stride;
+
+    for (int i = 0; i < 4; i++)
+    {
+        dst[i] = img->data[i];
+        dst_stride[i] = img->linesize[i];
+    }
+
+    swsCtx.Alloc (frame.w, frame.h, frame.fmt, dst_fmt);
+    swsCtx.setColorSpace (SWS_CS_DEFAULT, 1, SWS_CS_DEFAULT, 1);
+    swsCtx.scaleMT (*gThreadPool, &src, &src_stride, 0, frame.h, dst, dst_stride);
 }
 
 
-int Encoder::WriteFunc (void *opaque, const uint8_t *buf, int buf_len)
+int Encoder::writeFunc (void *opaque, const uint8_t *buf, int buf_len)
 {
     FILE *fp = (FILE*)opaque;
 
@@ -211,103 +273,21 @@ int Encoder::WriteFunc (void *opaque, const uint8_t *buf, int buf_len)
 }
 
 
-void Encoder::Encode (FILE *fp, const EncImage &img)
+void Encoder::Encode (FILE *fp, const EncParam &param, const FrameDesc &frame)
 {
-    Logi ("Encoding...\n");
-    FAIL_THROW (bpg_encoder_encode (ctx.get(), img, WriteFunc, fp));
-    Logi ("Done\n");
-}
-
-
-EncImage::EncImage (
-    int w,
-    int h,
-    BPGImageFormatEnum fmt,
-    bool has_alpha,
-    BPGColorSpaceEnum cs,
-    int bit_depth)
-{
-    img.reset (
-        image_alloc (w, h, fmt, has_alpha ? 1 : 0, cs, bit_depth),
-        image_free
+    pBPGEncoderContext ctx (
+        bpg_encoder_open (param.get()),
+        bpg_encoder_close
     );
-}
 
+    if (!ctx)
+        throw runtime_error ("Encoder parameter not set");
 
-void EncImage::Convert (const void *dat)
-{
-    Logi ("Converting color format...\n");
+    encImage img;
+    img.Alloc (param, frame);
+    img.Convert (param, frame);
 
-    switch (img->format)
-    {
-    case BPG_FORMAT_GRAY:
-        bpg_gray8_to_img (img.get(), dat);
-        break;
-    case BPG_FORMAT_444:
-        bpg_rgb24_to_img (img.get(), dat);
-        break;
-    default:
-        break;
-    }
-}
-
-
-EncImageBuffer::EncImageBuffer (int w, int h, EncInputFormat in_fmt):
-    w(w), h(h), inFmt(in_fmt), bufStride(0)
-{
-    switch (in_fmt)
-    {
-    case INPUT_GRAY8:
-        bufStride = w;
-        outFmt = BPG_FORMAT_GRAY;
-        hasAlpha = false;
-        break;
-
-    case INPUT_RGB8:
-    case INPUT_RGB24:
-        bufStride = w * 3;
-        outFmt = BPG_FORMAT_444;
-        hasAlpha = false;
-        break;
-
-    case INPUT_RGBA32:
-        bufStride = w * 4;
-        outFmt = BPG_FORMAT_444;
-        hasAlpha = true;
-        break;
-    default:
-        throw runtime_error ("invalid format");
-    }
-
-    buf.reset ( new uint8_t [bufStride * h] );
-}
-
-
-void EncImageBuffer::PutLine (int line, const void *dat, Palette *pal)
-{
-    switch (inFmt)
-    {
-    case INPUT_RGB8:
-    {
-        const uint8_t *src = (uint8_t*)dat;
-        Color *dst = (Color*)(buf.get() + line * bufStride);
-
-        for (int x = 0; x < w; x++)
-            *dst++ = (*pal)[src[x]];
-    }
-        break;
-
-    default:
-        memcpy (buf.get() + line * bufStride, dat, bufStride);
-        break;
-    }
-}
-
-
-EncImage *EncImageBuffer::CreateImage (BPGColorSpaceEnum out_cs, int bit_depth)
-{
-    EncImage *img = new EncImage (w, h, outFmt, hasAlpha, out_cs, bit_depth);
-    img->Convert (buf.get());
-
-    return img;
+    Logi ("Encoding...\n");
+    FAIL_THROW (bpg_encoder_encode (ctx.get(), img.get(), writeFunc, fp));
+    Logi ("Done\n");
 }

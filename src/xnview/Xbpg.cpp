@@ -10,6 +10,7 @@ extern "C" {
 }
 
 #include "log.h"
+#include "av_util.hpp"
 
 #define BPG_COMMON_SET
 #include "bpg_common.hpp"
@@ -27,11 +28,13 @@ EXTC BOOL APIENTRY DllMain (HANDLE hModule, DWORD ul_reason_for_call, LPVOID lpR
     {
     case DLL_PROCESS_ATTACH :
         Logi ("Compiled at %s %s\n", __TIME__, __DATE__);
-        gThreadPool = new ThreadPool;
+        bpg::gThreadPool = new ThreadPool;
+        avutil::init();
         break;
 
     case DLL_PROCESS_DETACH :
-        delete gThreadPool;
+        avutil::deinit();
+        delete bpg::gThreadPool;
         break;
 
     case DLL_THREAD_ATTACH  :
@@ -76,9 +79,8 @@ EXTC BOOL API gfpGetPluginInfo (
 }
 
 
-class BpgReader
+struct BpgReader
 {
-public:
     bpg::Decoder dec;
     bpg::Frame frame;
 };
@@ -140,15 +142,13 @@ EXTC BOOL API gfpLoadPictureGetLine (void *ptr, INT line, unsigned char *buffer)
     if (line==0)
         Logi("%s", __FUNCTION__);
 
-    BpgReader *r = (BpgReader*)ptr;
-    bpg::Decoder &dec = r->dec;
-    bpg::Frame &frame = r->frame;
+    BpgReader &r = *(BpgReader*)ptr;
 
     try {
-        if (!frame.isReady())
-            dec.ConvertToFrame (frame, *gThreadPool);
+        if (!r.frame)
+            r.dec.ConvertToFrame (r.frame);
 
-        frame.GetLine (line, buffer);
+        r.frame.GetLine (line, buffer);
     }
     catch (const exception &e) {
         Loge (e.what());
@@ -173,63 +173,13 @@ EXTC void API gfpLoadPictureExit( void * ptr )
 
 
 
-class BpgWriter
+struct BpgWriter
 {
-private:
-    shared_ptr<FILE> fp;
-
-    int w, h;
-    int bitsPerPixel;
-    bpg::EncInputFormat inFmt;
-
+    bpg::pFILE fp;
     bpg::EncParam param;
-    unique_ptr<bpg::Palette> pal;
-    unique_ptr<bpg::EncImageBuffer> buf;
-    unique_ptr<bpg::EncImage> img;
+    bpg::Frame frame;
 
-public:
-    BpgWriter (const char s_file[], int w, int h, int bits_per_pixel):
-        w(w), h(h), bitsPerPixel(bits_per_pixel), inFmt(bpg::INPUT_RGB24)
-    {
-        switch (bits_per_pixel)
-        {
-        case 8:
-            inFmt = bpg::INPUT_GRAY8;
-            break;
-        case 24:
-            inFmt = bpg::INPUT_RGB24;
-            break;
-        case 32:
-            inFmt = bpg::INPUT_RGBA32;
-            break;
-        default:
-            throw runtime_error ("invalid bits per pixel");
-        }
-
-        fp.reset (fopen (s_file, "wb"), fclose);
-        if (!fp)
-            throw runtime_error ("cannot open file");
-    }
-
-
-    void PutLine (int line, const void *data) {
-        if (!buf)
-            buf.reset ( new bpg::EncImageBuffer (w, h, inFmt) );
-
-        buf->PutLine (line, data, pal.get());
-    }
-
-    void Write() {
-        param.LoadConfig (ENC_CONFIG_FILE, bitsPerPixel);
-
-        if (inFmt == bpg::INPUT_GRAY8)
-            param->preferred_chroma_format = BPG_FORMAT_GRAY;
-
-        img.reset (buf->CreateImage (param.cs, param.BitDepth));
-
-        bpg::Encoder enc (param);
-        enc.Encode (fp.get(), *img);
-    }
+    BpgWriter(): fp(nullptr, fclose) {}
 };
 
 
@@ -254,19 +204,63 @@ EXTC void * API gfpSavePictureInit (
     INT * picture_type,
     LPSTR label, INT label_max_size )
 {
+    BpgWriter *pw = NULL;
+    enum AVPixelFormat fmt;
+    const char *s_prefix;
+
     Logi ("%s [%dx%d] %d bpp\n", __FUNCTION__, width, height, bits_per_pixel);
 
     *picture_type = GFP_RGB;
     strncpy (label, FORMAT_NAME, label_max_size);
 
     try {
-        BpgWriter *pwr = new BpgWriter (filename, width, height, bits_per_pixel);
-        return pwr;
+        pw = new BpgWriter;
+        BpgWriter &w = *pw;
+
+        switch (bits_per_pixel)
+        {
+            case 8:
+                fmt = AV_PIX_FMT_GRAY8;
+                w.param->preferred_chroma_format = BPG_FORMAT_GRAY;
+                s_prefix = "8:";
+                break;
+            case 24:
+                fmt = AV_PIX_FMT_RGB24;
+                s_prefix = "24:";
+                break;
+            case 32:
+                fmt = AV_PIX_FMT_RGBA;
+                s_prefix = "32:";
+                break;
+            default:
+                throw runtime_error ("invalid BPP");
+        }
+
+        /* Load arguments from INI file */
+        {
+            bpg::IniFile f_ini;
+            std::string s_opts;
+
+            f_ini.Open (ENC_CONFIG_FILE);
+            f_ini.GetLineByPrefix (s_opts, s_prefix);
+            w.param.Parse (s_opts.c_str());
+        }
+
+        w.frame.AllocByFormat (width, height, fmt);
+
+        /* Open file to write */
+        w.fp = bpg::pFILE (fopen (filename, "wb"), fclose);
+        if (!w.fp)
+            throw runtime_error (string("Cannot open file ") + filename);
     }
     catch (const exception &e) {
         Loge (e.what());
+        if (pw)
+            delete pw;
         return NULL;
     }
+
+    return pw;
 }
 
 EXTC BOOL API gfpSavePicturePutColormap (void *ptr, const GFP_COLORMAP *map)
@@ -281,9 +275,10 @@ EXTC BOOL API gfpSavePicturePutColormap (void *ptr, const GFP_COLORMAP *map)
 
 EXTC BOOL API gfpSavePicturePutLine( void *ptr, INT line, const unsigned char *buffer )
 {
+    BpgWriter &w = *(BpgWriter*)ptr;
+
     try {
-        BpgWriter &wr = *(BpgWriter*)ptr;
-        wr.PutLine (line, buffer);
+        w.frame.SetLine (line, buffer);
         return TRUE;
     }
     catch (const exception &e) {
@@ -294,13 +289,16 @@ EXTC BOOL API gfpSavePicturePutLine( void *ptr, INT line, const unsigned char *b
 
 EXTC void API gfpSavePictureExit( void * ptr )
 {
+    BpgWriter *pwr = (BpgWriter*)ptr;
+    BpgWriter &w = *pwr;
+
     try {
-        BpgWriter *pwr = (BpgWriter*)ptr;
-        pwr->Write();
-        delete pwr;
+        bpg::Encoder enc;
+        enc.Encode (w.fp.get(), w.param, w.frame);
     }
     catch (const exception &e) {
         Loge (e.what());
     }
 
+    delete pwr;
 }
