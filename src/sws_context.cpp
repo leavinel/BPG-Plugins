@@ -45,6 +45,7 @@ uint32_t Context::quality2algo (int quality)
     {
         case QUALITY_MIN:
             return SWS_POINT;
+        case -1: // Default
         case 1:
             return SWS_BILINEAR;
         case 2 ... QUALITY_MAX-1:

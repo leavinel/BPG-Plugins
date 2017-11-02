@@ -2,11 +2,14 @@
 
 ### Options ###
 DEBUG = 0
+VER = 0004
 
 ### External reference ###
 LIBX265_PATH = libx265_2.5
 BPG_PATH     = libbpg
 FFMPEG_PATH  = ffmpeg-3.4-win32-dev
+_7Z          = /d/System/7-Zip/7z.exe
+FFMPEG_SHARED_PATH = $(subst dev,shared,$(FFMPEG_PATH))
 
 ### Toolchains ###
 AR  = ar
@@ -56,32 +59,50 @@ vpath %.a   $(LIBX265_PATH) $(BPG_PATH) $(FFMPEG_PATH)/lib
 .PHONY: xnview
 xnview: obj/xnview/Xbpg.usr
 MODULES += obj/xnview/Xbpg.usr
-obj/xnview/Xbpg.usr: \
-    obj/xnview/Xbpg.cpp.o \
-    obj/xnview/Xbpg.rc.o  \
-    xnview/Xbpg.def
+obj/xnview/Xbpg.usr: obj/xnview/Xbpg.cpp.o \
+                     obj/xnview/Xbpg.rc.o \
+                     xnview/Xbpg.def
+MODULES_7Z += out/BPG-xnview-$(VER).7z
+out/BPG-xnview-$(VER).7z: obj/xnview/Xbpg.usr \
+                          src/xnview/Xbpg.ini
+
 
 # Susie plug-in
 .PHONY: susie
 susie: obj/susie/bpg.spi
 MODULES += obj/susie/bpg.spi
-obj/susie/bpg.spi: \
-    obj/susie/spi_bpg.cpp.o \
-    susie/spi00in.def
+obj/susie/bpg.spi: obj/susie/spi_bpg.cpp.o \
+                   susie/spi00in.def
+MODULES_7Z += out/BPG-susie-$(VER).7z
+out/BPG-susie-$(VER).7z: obj/susie/bpg.spi
+
 
 # Imagine plug-in
 .PHONY: imagine
 imagine: obj/imagine/bpg.plg
 MODULES += obj/imagine/bpg.plg
-obj/imagine/bpg.plg: \
-    obj/imagine/bpg.cpp.o \
-    obj/imagine/bpg.rc.o  \
-    imagine/bpg.def
+obj/imagine/bpg.plg: obj/imagine/bpg.cpp.o \
+                     obj/imagine/bpg.rc.o \
+                     imagine/bpg.def
+MODULES_7Z += out/BPG-imagine-$(VER).7z
+out/BPG-imagine-$(VER).7z: obj/imagine/bpg.plg
+
+
+# Shared DLL
+MODULES_7Z += out/BPG-dll-$(VER).7z
+out/BPG-dll-$(VER).7z: $(addprefix $(FFMPEG_SHARED_PATH)/bin/,avutil-55.dll swscale-4.dll)
 
 
 .PHONY: common
 common: obj/libbpg_common.a
-libbpg_common_SRCS = reader.cpp writer.cpp frame.cpp threadpool.cpp looptask.cpp dprintf.cpp sws_context.cpp av_util.cpp
+libbpg_common_SRCS = reader.cpp \
+                     writer.cpp \
+                     frame.cpp \
+                     threadpool.cpp \
+                     looptask.cpp \
+                     dprintf.cpp \
+                     sws_context.cpp \
+                     av_util.cpp
 
 
 include $(wildcard obj/*.d)
@@ -90,9 +111,12 @@ include $(wildcard $(addsuffix /*.d,$(notdir $(MODULES))))
 .PHONY: all
 all: $(MODULES)
 
+.PHONY: release
+release: $(MODULES_7Z)
+
 .PHONY: clean
 clean:
-	rm -rf obj
+	rm -rf obj out
 
 .PHONY: libbpg libbpg-force
 libbpg: $(BPG_PATH)/libbpg.a
@@ -105,7 +129,7 @@ libbpg-clean:
 	cd $(BPG_PATH); make clean LIBX265_PATH=../$(LIBX265_PATH)
 
 # Output directory
-obj $(dir $(MODULES)):
+obj out $(dir $(MODULES)):
 	@echo '[MKDIR] $@'
 	@mkdir -p $@
 
@@ -127,12 +151,17 @@ obj/%.a: $$(call src2obj,$$(%_SRCS)) | $$(@D)
 	@echo '[AR] $@'
 	$(V)$(AR) rcs $@ $^
 
+%.7z: | $$(@D)
+	@echo '[7Z] $@'
+	$(V)$(_7Z) a -t7z -mx7 $@ $(addprefix ./,$^)
+
 # Link modules (DLL)
 $(MODULES): obj/libbpg_common.a $(BPG_PATH)/libbpg.a libswscale.dll.a libx265.a
 $(MODULES): | $$(@D)
 	@echo '[LD] $@'
-	$(V)$(CXX) -shared $(CPPFLAGS) $(CFLAGS) $(filter-out %.a,$^) $(filter %.a,$^) $(LDFLAGS) -o $@
+	$(V)$(CXX) -static -shared $(CPPFLAGS) $(CFLAGS) $(filter-out %.a,$^) $(filter %.a,$^) $(LDFLAGS) -o $@
 ifneq ($(DEBUG),1)
 	@echo '[STRIP] $@'
 	$(V)$(STRIP) -s $@
 endif
+

@@ -108,7 +108,7 @@ static LPIMAGINEBITMAP IMAGINEAPI loadFile(IMAGINEPLUGINFILEINFOTABLE *fileInfoT
         dst = (uint8_t*) iface->lpVtbl->GetBits (bitmap);
         dst += linesz * (info.height - 1);
         dst_stride = -linesz;
-        dec.Convert (dst_fmt, dst, dst_stride, true);
+        dec.Convert (dst_fmt, dst, dst_stride);
         return bitmap;
     }
     catch (const exception &e) {

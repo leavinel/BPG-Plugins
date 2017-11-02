@@ -102,10 +102,10 @@ public:
         enum AVPixelFormat dst_fmt,
         void *dst,
         int dst_stride,
-        int quality = 9
+        int quality = -1
     );
 
-    int ConvertToFrame (Frame &frame, int quality = 9);
+    int ConvertToFrame (Frame &frame, int quality = -1);
 };
 
 

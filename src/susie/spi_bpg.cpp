@@ -192,7 +192,7 @@ static int read_image (LPSTR buf, long len, unsigned int flag,
             dst = (uint8_t*)buf + (linesz * (info.height-1));
             dst_stride = -linesz;
 
-            dec.Convert (dst_fmt, dst, dst_stride, 1);
+            dec.Convert (dst_fmt, dst, dst_stride);
         }
         while (0);
 

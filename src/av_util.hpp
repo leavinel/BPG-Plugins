@@ -12,6 +12,7 @@ extern "C" {
 #include "libavutil/pixdesc.h"
 }
 
+#undef EXT
 #ifdef AV_UTIL_SET
 #define EXT
 #else

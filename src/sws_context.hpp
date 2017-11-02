@@ -59,7 +59,7 @@ public:
 
     Context();
 
-    void Alloc (int w, int h, enum AVPixelFormat src_fmt, enum AVPixelFormat dst_fmt, int quality = QUALITY_MAX);
+    void Alloc (int w, int h, enum AVPixelFormat src_fmt, enum AVPixelFormat dst_fmt, int quality = -1);
 
     void setColorSpace (
         int src_cs, int src_full_rng,

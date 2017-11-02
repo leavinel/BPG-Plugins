@@ -257,7 +257,7 @@ void encImage::Convert (const EncParam &param, const FrameDesc &frame)
         dst_stride[i] = img->linesize[i];
     }
 
-    swsCtx.Alloc (frame.w, frame.h, frame.fmt, dst_fmt);
+    swsCtx.Alloc (frame.w, frame.h, frame.fmt, dst_fmt, swsCtx.QUALITY_MAX);
     swsCtx.setColorSpace (SWS_CS_DEFAULT, 1, SWS_CS_DEFAULT, 1);
     swsCtx.scaleMT (*gThreadPool, &src, &src_stride, 0, frame.h, dst, dst_stride);
 }
