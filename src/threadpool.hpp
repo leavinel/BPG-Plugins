@@ -16,42 +16,20 @@
 #include "winthread.hpp"
 
 
-class ThreadPool;
-
-
-/**
- * Thread which waits and runs the task queue
- */
-class WorkerThread: public winthread::thread
-{
-private:
-    ThreadPool &pool;
-
-public:
-    WorkerThread (ThreadPool &pool): pool(pool) {}
-    virtual ~WorkerThread() override {}
-
-    void start();
-    void join();
-
-    /* pthread::task */
-    virtual void run() override;
-};
-
-
 /**
  * WorkerThread management pool
  */
 class ThreadPool
 {
-    friend class WorkerThread;
 private:
     uint8_t numOfProc;
     bool bStarted;
     winthread::mutex taskMtx;
     winthread::cond_var taskCv;
-    std::queue<winthread::task*> tasks;
-    std::vector<std::shared_ptr<WorkerThread>> threads;
+    std::queue<std::function<void()>> tasks;
+    std::unique_ptr<winthread::thread[]> threads;
+    void dequeueTask (std::function<void()> &task);
+    void threadProc();
 
 public:
     enum { AUTO_PROC = 0 };
@@ -61,7 +39,7 @@ public:
     void Join();
 
     uint8_t GetNumOfProc() const { return numOfProc; }
-    void EnqueueTask (winthread::task *pt);
+    void EnqueueTask (const std::function<void()> &task);
 };
 
 

@@ -14,47 +14,23 @@ using namespace std;
 using namespace winthread;
 
 
-void WorkerThread::run()
+/**
+ * Main procedure of worker thread
+ */
+void ThreadPool::threadProc()
 {
-    mutex &taskMtx = pool.taskMtx;
-    cond_var &taskCv = pool.taskCv;
-    queue<task*> &tasks = pool.tasks;
-    task *pt;
-
     while (1)
     {
-        /* Wait if no task available */
-        {
-            lock_guard _l(taskMtx);
+        function<void()> task;
 
-            while (tasks.size() == 0)
-                taskCv.wait (taskMtx);
+        dequeueTask (task);
 
-            /* Dequeue 1 task */
-            pt = tasks.front();
-            tasks.pop();
+        if (!task) // Terminate
+            break;
 
-            if (!pt) // NULL task means terminate
-                break;
-        }
-
-        pt->run();
+        task();
     }
 }
-
-
-void WorkerThread::start()
-{
-    thread::start();
-}
-
-
-void WorkerThread::join()
-{
-    if (joinable())
-        thread::join();
-}
-
 
 
 ThreadPool::ThreadPool (uint8_t num): numOfProc(num), bStarted(false)
@@ -78,11 +54,13 @@ void ThreadPool::Start()
 
     if (numOfProc > 1)
     {
-        for (int i = 0; i < numOfProc; i++)
-            threads.push_back (make_shared<WorkerThread>(*this));
+        threads = unique_ptr<winthread::thread[]> (new winthread::thread[numOfProc]);
 
         for (int i = 0; i < numOfProc; i++)
-            threads[i]->start();
+        {
+            function<void()> t = bind (&threadProc, this);
+            threads[i].start (t);
+        }
     }
 
     bStarted = true;
@@ -91,34 +69,59 @@ void ThreadPool::Start()
 
 void ThreadPool::Join()
 {
+    function<void()> term; // Terminator
+
     if (!bStarted)
         return;
 
     if (numOfProc > 1)
     {
+        /* Insert terminator task to all threads */
         for (int i = 0; i < numOfProc; i++)
-            EnqueueTask (NULL);
+            EnqueueTask (term);
 
+        /* Wait all threads done */
         for (int i = 0; i < numOfProc; i++)
-            threads[i]->join();
+        {
+            if (threads[i].joinable())
+                threads[i].join();
+        }
     }
 }
 
 
-void ThreadPool::EnqueueTask (task *pt)
+void ThreadPool::EnqueueTask (const function<void()> &task)
 {
     if (!bStarted)
         Start();
 
-    if (numOfProc == 1) // Single-thread
+    if (numOfProc == 1)
     {
-        pt->run();
+        /* Single thread, execute immediately */
+        if (task)
+            task();
     }
     else // Multi-thread
     {
         lock_guard lck(taskMtx);
-        tasks.push (pt);
+        tasks.push (task);
         taskCv.notify_one();
     }
 }
 
+
+/**
+ * Wait and dequeue incoming task
+ */
+void ThreadPool::dequeueTask (function<void()> &task)
+{
+    lock_guard _l(taskMtx);
+
+    /* Wait if no task available */
+    while (tasks.size() == 0)
+        taskCv.wait (taskMtx);
+
+    /* Dequeue the front task */
+    task = tasks.front();
+    tasks.pop();
+}

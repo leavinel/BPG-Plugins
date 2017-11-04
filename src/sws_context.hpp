@@ -43,6 +43,9 @@ private:
         uint8_t planes;
         const int *coeff;
         uint8_t full_rng;
+
+        bool isPLANAR() const;
+        bool isRGB() const;
     } src, dst;
 
     int brightness;
@@ -50,6 +53,7 @@ private:
     int saturation;
 
     static uint32_t quality2algo (int quality);
+    static void calcAddr (uint8_t *buf[4], const attr &a, int y);
 
 public:
     enum {

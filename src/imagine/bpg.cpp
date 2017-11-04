@@ -7,12 +7,13 @@
 
 extern "C" {
 #include <stdio.h>
-#include <exception>
 #include <windows.h>
 #include "ImagPlug.h"
 }
 
 #include "log.h"
+
+#include <exception>
 #include "av_util.hpp"
 
 #define BPG_COMMON_SET
@@ -135,7 +136,7 @@ static BOOL IMAGINEAPI registerProcA(const IMAGINEPLUGININTERFACE *iface)
         FORMAT_NAME,
         FORMAT_EXT "\0",
     };
-    return (BOOL)iface->lpVtbl->RegisterFileType(&fileInfoItemA);
+    return (NULL != iface->lpVtbl->RegisterFileType(&fileInfoItemA));
 }
 
 
@@ -149,7 +150,7 @@ static BOOL IMAGINEAPI registerProcW(const IMAGINEPLUGININTERFACE *iface)
         (LPCTSTR) UNICODE_TEXT(FORMAT_NAME),
         (LPCTSTR) UNICODE_TEXT(FORMAT_EXT "\0"),
     };
-    return (BOOL)iface->lpVtbl->RegisterFileType(&fileInfoItemW);
+    return (NULL != iface->lpVtbl->RegisterFileType(&fileInfoItemW));
 }
 
 

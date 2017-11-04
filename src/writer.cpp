@@ -268,7 +268,7 @@ int Encoder::writeFunc (void *opaque, const uint8_t *buf, int buf_len)
     FILE *fp = (FILE*)opaque;
 
     size_t len = fwrite (buf, 1, buf_len, fp);
-    Logi ("Written %d/%d bytes...\n", buf_len, len);
+    Logi ("Written %u/%u bytes...\n", buf_len, (unsigned int)len);
     return len;
 }
 

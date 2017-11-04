@@ -12,8 +12,8 @@
 #define FORMAT_EXT      "bpg"
 #define LIBBPG_VER      "0.9.7"
 #define LIBX265_VER     "2.5"
-#define MODULE_VER      0,0,0,4
-#define MODULE_VER_STR  "0.0.0.4"
+#define MODULE_VER      0,0,0,5
+#define MODULE_VER_STR  "0.0.0.5"
 
 
 #endif /* _BPG_DEF_H_ */

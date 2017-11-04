@@ -130,32 +130,28 @@ class Context::convertTask: public LoopTask
 private:
     Context &ctx;
 
-    static bool isPLANAR (const attr &a);
-    static bool isRGB (const attr &a);
-    static void calcAddr (uint8_t *buf[4], const attr &a, uint32_t y);
-
 public:
     convertTask (Context &ctx): ctx(ctx) {}
     virtual void loop (int begin, int end, int step) override;
 };
 
 
-bool Context::convertTask::isPLANAR (const attr &a)
+bool Context::attr::isPLANAR() const
 {
-    return !!(a.desc->flags & AV_PIX_FMT_FLAG_PLANAR);
+    return !!(desc->flags & AV_PIX_FMT_FLAG_PLANAR);
 }
 
 
-bool Context::convertTask::isRGB (const attr &a)
+bool Context::attr::isRGB() const
 {
-    return !!(a.desc->flags & AV_PIX_FMT_FLAG_RGB);
+    return !!(desc->flags & AV_PIX_FMT_FLAG_RGB);
 }
 
 
 /**
  * Perform Y offset on src/dst slice addresses
  */
-void Context::convertTask::calcAddr (uint8_t *buf[4], const attr &a, uint32_t y)
+void Context::calcAddr (uint8_t *buf[4], const attr &a, int y)
 {
     int i;
 
@@ -165,7 +161,7 @@ void Context::convertTask::calcAddr (uint8_t *buf[4], const attr &a, uint32_t y)
 
     if (y) // Need offset
     {
-        if (isPLANAR(a) && !isRGB(a)) // Planar YUV
+        if (a.isPLANAR() && !a.isRGB()) // Planar YUV
         {
             buf[0] += a.stride[0] * y;
             buf[1] += a.stride[1] * (y >> a.desc->log2_chroma_h);

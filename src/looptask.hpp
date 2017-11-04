@@ -12,7 +12,7 @@
 
 
 /**
- * A loop-based task
+ * A loop-based task which shall loop within index [begin, end)
  */
 struct LoopTask
 {
@@ -30,11 +30,8 @@ struct LoopTask
 class LoopTaskManager
 {
 private:
-    class innerTask;
-
     winthread::mutex mtx;
     winthread::cond_var cv;
-
     ThreadPool &pool;
     int begin;
     int end;
@@ -43,11 +40,10 @@ private:
 
     volatile uint8_t waitCnt;
 
-    void reportDone (innerTask *itask);
-
     int calcOptTaskCnt() const;
     int calcEndingIdx() const;
-    void dispatchTasks (LoopTask *ltasks[]);
+    void dispatchTasks (LoopTask* const ltasks[]);
+    void threadProc (LoopTask *ltask, int begin, int end, int step);
 
 public:
     LoopTaskManager (ThreadPool &pool):

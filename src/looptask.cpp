@@ -12,31 +12,6 @@ using namespace std;
 using namespace winthread;
 
 
-/**
- * LoopTask inner task wrapper class
- */
-class LoopTaskManager::innerTask: public task
-{
-private:
-    LoopTaskManager *set;
-    LoopTask *ltask;
-    int begin;
-    int end;
-    int step;
-
-public:
-    innerTask (LoopTaskManager *set, LoopTask *ltask, int begin, int end, int step):
-        set(set), ltask(ltask), begin(begin), end(end), step(step) {}
-
-    virtual ~innerTask(){}
-
-    virtual void run() override {
-        /* Execute loop, then report done */
-        ltask->loop (begin, end, step);
-        set->reportDone (this);
-    }
-};
-
 
 void LoopTaskManager::SetLoopRange (int begin, int end, int step, int minIterPerTask)
 {
@@ -48,10 +23,14 @@ void LoopTaskManager::SetLoopRange (int begin, int end, int step, int minIterPer
 
 
 /**
- * For inner tasks to report that the task done
+ * Thread procedure
  */
-void LoopTaskManager::reportDone (innerTask *itask)
+void LoopTaskManager::threadProc (LoopTask *ltask, int begin, int end, int step)
 {
+    /* Execute loop, then report done */
+    if (ltask)
+        ltask->loop (begin, end, step);
+
     lock_guard _l(mtx);
 
     if (--waitCnt == 0)
@@ -98,15 +77,16 @@ int LoopTaskManager::calcEndingIdx() const
 /**
  * Wait all inner task is done
  */
-void LoopTaskManager::dispatchTasks (LoopTask *ltasks[])
+void LoopTaskManager::dispatchTasks (LoopTask* const ltasks[])
 {
     size_t procCnt = pool.GetNumOfProc();
-    innerTask *itasks[procCnt];
+    function<void()> itasks[procCnt];
 
     int loopCnt = (end - begin) / step;
     int loopPerProc = loopCnt / procCnt;
     int begin2 = begin, end2;
 
+    /* Create inner tasks */
     for (size_t i = 0; i < procCnt; i++)
     {
         if (i == procCnt-1) // Last task
@@ -114,7 +94,7 @@ void LoopTaskManager::dispatchTasks (LoopTask *ltasks[])
         else
             end2 = begin + loopPerProc * step;
 
-        itasks[i] = new innerTask (this, ltasks[i], begin2, end2, step);
+        itasks[i] = bind (&threadProc, this, ltasks[i], begin2, end2, step);
         begin2 = end2;
     }
 
@@ -129,7 +109,4 @@ void LoopTaskManager::dispatchTasks (LoopTask *ltasks[])
 
         cv.wait (mtx);
     }
-
-    for (size_t i = 0; i < procCnt; i++)
-        delete itasks[i];
 }
